@@ -29,7 +29,7 @@ namespace Whisper
 	__interface __declspec( novtable, uuid( "fb9763a5-d77d-4b6e-aff8-f494813cebd8" ) ) iMediaFoundation : public IUnknown
 	{
 		HRESULT __stdcall loadAudioFile( LPCTSTR path, bool stereo, iAudioBuffer** pp ) const;
-		HRESULT __stdcall openAudioFile( LPCTSTR path, bool stereo, iAudioReader** pp );
+		HRESULT __stdcall openAudioFile( LPCTSTR path, bool stereo, iAudioReader** pp, int start_time_ms = 0);
 		HRESULT __stdcall loadAudioFileData( const void* data, uint64_t size, bool stereo, iAudioReader** pp );
 
 		HRESULT __stdcall listCaptureDevices( pfnFoundCaptureDevices pfn, void* pv );

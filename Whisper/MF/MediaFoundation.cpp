@@ -47,7 +47,7 @@ namespace Whisper
 		}
 	public:
 
-		HRESULT open( iMediaFoundation* owner, LPCTSTR path, bool stereo )
+		HRESULT open( iMediaFoundation* owner, LPCTSTR path, bool stereo, int start_time_ms=0)
 		{
 			HRESULT hr = MFCreateSourceReaderFromURL( path, nullptr, &reader );
 			if( FAILED( hr ) )
@@ -55,6 +55,20 @@ namespace Whisper
 				logError16( L"Unable to decode audio file \"%s\", MFCreateSourceReaderFromURL failed", path );
 				return hr;
 			}
+
+			// set start time
+			PROPVARIANT var;
+			PropVariantInit(&var);
+			var.vt = VT_I8;
+			var.hVal.QuadPart = static_cast<long long> (start_time_ms) / 1000 * 10000000;
+
+			HRESULT hr2 = reader->SetCurrentPosition(GUID_NULL, var);
+			if (FAILED(hr2))
+			{
+				logError16(L"Unable to set start time! \"%d\"", start_time_ms);
+				return hr2;
+			}
+
 			wantStereo = stereo;
 			mediaFoundation = owner;
 			logDebug16( L"Created source reader from the file \"%s\"", path );
@@ -95,14 +109,14 @@ namespace Whisper
 		{
 			return Whisper::loadAudioFile( path, stereo, pp );
 		}
-		HRESULT COMLIGHTCALL openAudioFile( LPCTSTR path, bool stereo, iAudioReader** pp ) noexcept override final
+		HRESULT COMLIGHTCALL openAudioFile( LPCTSTR path, bool stereo, iAudioReader** pp, int start_time_ms = 0) noexcept override final
 		{
 			if( nullptr == path || nullptr == pp )
 				return E_POINTER;
 
 			ComLight::CComPtr<ComLight::Object<AudioReader>> res;
 			CHECK( ComLight::Object<AudioReader>::create( res ) );
-			CHECK( res->open( this, path, stereo ) );
+			CHECK( res->open( this, path, stereo, start_time_ms) );
 
 			res.detach( pp );
 			return S_OK;

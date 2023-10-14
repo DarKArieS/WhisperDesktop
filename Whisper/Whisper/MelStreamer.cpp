@@ -420,11 +420,15 @@ HRESULT MelStreamerThread::makeBuffer( size_t off, size_t len, const float** buf
 			return E_UNEXPECTED;
 		}
 
-		if( off > streamStartOffset )
+		if( off > streamStartOffset && streamStartOffset != 0)
 		{
 			// The model wants to advance forward, drop now irrelevant chunks of data
 			dropOldChunks( off );
 			wakeThread = ( threadStatus == eThreadStatus::Working || threadStatus == eThreadStatus::Idle );
+		}
+
+		if (off > streamStartOffset && streamStartOffset == 0) {
+			streamStartOffset = off;
 		}
 
 		while( true )

@@ -462,10 +462,11 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		return E_NOTIMPL;
 	}
 
-	CurrentSpectrogramRaii _cs( this, mel );
+	// CurrentSpectrogramRaii _cs( this, mel );
 	const int seek_start = params.offset_ms / 10;
-	const int seek_end = seek_start + ( params.duration_ms == 0 ? (int)mel.getLength() : params.duration_ms / 10 );
-
+	// const int seek_end = seek_start + ( params.duration_ms == 0 ? (int)mel.getLength() : params.duration_ms / 10 );
+	const int seek_end = (params.duration_ms == 0 ? (int)mel.getLength() : seek_start + params.duration_ms / 10);
+	
 	// if length of spectrogram is less than 1s (100 samples), then return
 	// basically don't process anything that is less than 1s
 	// see issue #39: https://github.com/ggerganov/whisper.cpp/issues/39
