@@ -35,6 +35,7 @@ public:
 		ON_BUTTON_CLICK( IDC_CAPTURE, onCapture )
 		COMMAND_HANDLER( IDC_OUTPUT_FORMAT, CBN_SELCHANGE, onOutFormatChange )
 		COMMAND_HANDLER( IDC_PATH_MEDIA, EN_CHANGE, onInputChange )
+		// COMMAND_HANDLER(IDC_EDIT_START_TIME, EN_CHANGE, onStartTimeInputChange)
 		MESSAGE_HANDLER( WM_CALLBACK_STATUS, onCallbackStatus )
 		MSG_WM_CLOSE( onWmClose )
 	END_MSG_MAP()
@@ -47,6 +48,8 @@ public:
 		DDX_CONTROL_HANDLE( IDC_PATH_RESULT, transcribeOutputPath )
 		DDX_CONTROL_HANDLE( IDC_BROWSE_RESULT, transcribeOutputBrowse );
 		DDX_CONTROL_HANDLE( IDC_TRANSCRIBE, transcribeButton );
+		DDX_CONTROL_HANDLE(IDC_EDIT_START_TIME, transcribeStartTime);
+		DDX_CONTROL_HANDLE(IDC_EDIT_END_TIME, transcribeEndTime);
 		DDX_CONTROL_HANDLE( IDC_TRANSCRIBE_PROGRESS, progressBar );
 	END_DDX_MAP()
 
@@ -72,6 +75,8 @@ private:
 
 	LanguageDropdown languageSelector;
 	TranslateCheckbox cbTranslate;
+	CEdit transcribeStartTime;
+	CEdit transcribeEndTime;
 
 	CEdit sourceMediaPath;
 	CButton useInputFolder;
@@ -111,6 +116,8 @@ private:
 		uint64_t startTime;
 		int64_t mediaDuration;
 		CString errorMessage;
+		CString customStartTime;
+		CString customEndTime;
 	};
 	TranscribeArgs transcribeArgs;
 

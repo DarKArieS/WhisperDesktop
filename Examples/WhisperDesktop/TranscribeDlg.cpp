@@ -285,6 +285,8 @@ void TranscribeDlg::onTranscribe()
 	transcribeArgs.format = (eOutputFormat)(uint8_t)transcribeOutFormat.GetCurSel();
 	if( transcribeArgs.format != eOutputFormat::None )
 	{
+		transcribeStartTime.GetWindowText( transcribeArgs.customStartTime );
+		transcribeEndTime.GetWindowText( transcribeArgs.customEndTime );
 		transcribeOutputPath.GetWindowText( transcribeArgs.pathOutput );
 		if( transcribeArgs.pathOutput.GetLength() <= 0 )
 		{
@@ -397,9 +399,6 @@ HRESULT TranscribeDlg::transcribe()
 	transcribeArgs.errorMessage = L"";
 
 	using namespace Whisper;
-	CComPtr<iAudioReader> reader;
-
-	CHECK_EX( appState.mediaFoundation->openAudioFile( transcribeArgs.pathMedia, false, &reader ) );
 
 	const eOutputFormat format = transcribeArgs.format;
 	CAtlFile outputFile;
@@ -413,8 +412,12 @@ HRESULT TranscribeDlg::transcribe()
 
 	sFullParams fullParams;
 	CHECK_EX( context->fullDefaultParams( eSamplingStrategy::Greedy, &fullParams ) );
+	
 	fullParams.language = transcribeArgs.language;
 	fullParams.setFlag( eFullParamsFlags::Translate, transcribeArgs.translate );
+	//fullParams.setFlag( eFullParamsFlags::TokenTimestamps, true);
+	//fullParams.setFlag( eFullParamsFlags::SingleSegment, true);
+	//fullParams.setFlag( eFullParamsFlags::NoContext, true);
 	fullParams.resetFlag( eFullParamsFlags::PrintRealtime );
 
 	// Setup the callbacks
@@ -422,6 +425,20 @@ HRESULT TranscribeDlg::transcribe()
 	fullParams.new_segment_callback_user_data = this;
 	fullParams.encoder_begin_callback = &encoderBeginCallback;
 	fullParams.encoder_begin_callback_user_data = this;
+	
+	int customeStartTime = _ttoi(transcribeArgs.customStartTime);
+	int customeEndTime = _ttoi(transcribeArgs.customEndTime);
+	fullParams.offset_ms = customeStartTime * 1000;
+	if (customeEndTime > customeStartTime) {
+		fullParams.duration_ms = (customeEndTime - customeStartTime) * 1000;
+	}
+	else {
+		fullParams.duration_ms = 0;
+	}
+
+	// Setup Audio Reader
+	CComPtr<iAudioReader> reader;
+	CHECK_EX(appState.mediaFoundation->openAudioFile(transcribeArgs.pathMedia, false, &reader, customeStartTime * 1000));
 
 	// Setup the progress indication sink
 	sProgressSink progressSink{ &progressCallbackStatic, this };

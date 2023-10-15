@@ -57,16 +57,18 @@ namespace Whisper
 			}
 
 			// set start time
-			PROPVARIANT var;
-			PropVariantInit(&var);
-			var.vt = VT_I8;
-			var.hVal.QuadPart = static_cast<long long> (start_time_ms) / 1000 * 10000000;
+			if (start_time_ms > 0) {
+				PROPVARIANT var;
+				PropVariantInit(&var);
+				var.vt = VT_I8;
+				var.hVal.QuadPart = static_cast<long long> (start_time_ms) / 1000 * 10000000;
 
-			HRESULT hr2 = reader->SetCurrentPosition(GUID_NULL, var);
-			if (FAILED(hr2))
-			{
-				logError16(L"Unable to set start time! \"%d\"", start_time_ms);
-				return hr2;
+				HRESULT hr2 = reader->SetCurrentPosition(GUID_NULL, var);
+				if (FAILED(hr2))
+				{
+					logError16(L"Unable to set start time! \"%d\"", start_time_ms);
+					return hr2;
+				}
 			}
 
 			wantStereo = stereo;
