@@ -10,11 +10,13 @@ namespace Whisper
 		uint32_t days;
 		uint8_t hours, minutes, seconds;
 		uint32_t ticks;
+		uint32_t fullSeconds;
 
 		sTimeSpanFields( uint64_t tt )
 		{
 			ticks = (uint32_t)( tt % 10'000'000 );
 			tt /= 10'000'000;
+			fullSeconds = tt;
 			seconds = (uint8_t)( tt % 60 );
 			tt /= 60;
 			minutes = (uint8_t)( tt % 60 );

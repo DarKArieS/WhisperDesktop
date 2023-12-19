@@ -34,4 +34,4 @@ HRESULT logNewSegments( const Whisper::iTranscribeResult* results, size_t newSeg
 void clearLastError();
 bool getLastError( CString& rdi );
 
-void printTime( CStringA& rdi, Whisper::sTimeSpan time, bool comma = false );
+void printTime( CStringA& rdi, Whisper::sTimeSpan time, bool comma = false, bool printFullSeconds = false);

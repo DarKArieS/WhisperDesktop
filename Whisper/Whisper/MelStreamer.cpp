@@ -57,8 +57,9 @@ HRESULT MelStreamer::ensurePcmChunks( size_t len )
 
 size_t MelStreamer::serializePcm( size_t startOffset )
 {
+	try {
 	const ptrdiff_t chunks = (ptrdiff_t)queuePcmMono.size() - (ptrdiff_t)startOffset;
-	assert( chunks > 0 );
+	// assert( chunks > 0 );
 
 	tempPcm.resize( chunks * FFT_STEP );
 	float* rdi = tempPcm.data();
@@ -69,6 +70,10 @@ size_t MelStreamer::serializePcm( size_t startOffset )
 		rdi += FFT_STEP;
 	}
 	return chunks;
+	}
+	catch (...) {
+		return 0;
+	}
 }
 
 namespace

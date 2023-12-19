@@ -7,6 +7,9 @@ class AppState
 	CRegKey registryKey;
 	CIcon appIcon;
 public:
+	CStringA currentResult;
+	uint32_t duplicatedSecond;
+	std::vector<CStringA> duplicatedResults;
 
 	struct ModelSource
 	{

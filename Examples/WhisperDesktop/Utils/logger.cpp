@@ -24,17 +24,28 @@ namespace
 	}
 }
 
-void printTime( CStringA& rdi, Whisper::sTimeSpan time, bool comma )
+void printTime( CStringA& rdi, Whisper::sTimeSpan time, bool comma, bool printFullSeconds )
 {
 	Whisper::sTimeSpanFields fields = time;
 	const uint32_t hours = fields.days * 24 + fields.hours;
 	const char separator = comma ? ',' : '.';
-	rdi.AppendFormat( "%02d:%02d:%02d%c%03d",
-		(int)hours,
-		(int)fields.minutes,
-		(int)fields.seconds,
-		separator,
-		fields.ticks / 10'000 );
+	if (printFullSeconds) {
+		rdi.AppendFormat("%02d:%02d:%02d%c%03d (%02ds)",
+			(int)hours,
+			(int)fields.minutes,
+			(int)fields.seconds,
+			separator,
+			fields.ticks / 10'000,
+			(int)fields.fullSeconds);
+	}
+	else {
+		rdi.AppendFormat("%02d:%02d:%02d%c%03d",
+			(int)hours,
+			(int)fields.minutes,
+			(int)fields.seconds,
+			separator,
+			fields.ticks / 10'000 );
+	}
 }
 
 HRESULT logNewSegments( const iTranscribeResult* results, size_t newSegments, bool printSpecial )
@@ -53,9 +64,9 @@ HRESULT logNewSegments( const iTranscribeResult* results, size_t newSegments, bo
 	{
 		const sSegment& seg = segments[ i ];
 		str = "[";
-		printTime( str, seg.time.begin );
+		printTime( str, seg.time.begin, false, true );
 		str += " --> ";
-		printTime( str, seg.time.end );
+		printTime( str, seg.time.end, false, true );
 		str += "]  ";
 
 		for( uint32_t j = 0; j < seg.countTokens; j++ )

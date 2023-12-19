@@ -450,7 +450,7 @@ HRESULT TranscribeDlg::transcribe()
 	// https://github.com/Const-me/Whisper/issues/4
 	CHECK_EX( reader->getDuration( transcribeArgs.mediaDuration ) );
 
-	context->timingsPrint();
+	// context->timingsPrint();
 
 	if( format == eOutputFormat::None )
 		return S_OK;
@@ -469,7 +469,7 @@ HRESULT TranscribeDlg::transcribe()
 	case eOutputFormat::TextTimestamps:
 		return writeTextFile( segments, len.countSegments, outputFile, true );
 	case eOutputFormat::SubRip:
-		return writeSubRip( segments, len.countSegments, outputFile );
+		return writeSubRip( segments, len.countSegments, appState.duplicatedResults.size(), outputFile);
 	case eOutputFormat::WebVTT:
 		return writeWebVTT( segments, len.countSegments, outputFile );
 	default:
@@ -547,13 +547,31 @@ HRESULT TranscribeDlg::writeTextFile( const sSegment* const segments, const size
 	return S_OK;
 }
 
-HRESULT TranscribeDlg::writeSubRip( const sSegment* const segments, const size_t length, CAtlFile& file )
+HRESULT TranscribeDlg::writeSubRip( const sSegment* const segments, const size_t length, const size_t dupLines , CAtlFile& file )
 {
+	if (segments == nullptr) {
+		logWarning(u8"segments is null, writeSubRip fail!");
+		return S_OK;
+	}
+
 	CHECK( writeUtf8Bom( file ) );
+
+	logInfo(u8"total lines : %d", length);
+	logInfo(u8"remove dup lines : %d", dupLines);
+
+	if (length - dupLines <= 0) {
+		return S_OK;
+	}
+
 	CStringA line;
-	for( size_t i = 0; i < length; i++ )
+	for( size_t i = 0; i < length - dupLines; i++ )
 	{
 		const sSegment& seg = segments[ i ];
+		char ch = '(';
+
+		if (std::strchr(seg.text, ch)) {
+			continue;
+		}
 
 		line.Format( "%zu\r\n", i + 1 );
 		printTime( line, seg.time.begin, true );
@@ -595,6 +613,58 @@ inline HRESULT TranscribeDlg::newSegmentCallback( Whisper::iContext* ctx, uint32
 	using namespace Whisper;
 	CComPtr<iTranscribeResult> result;
 	CHECK( ctx->getResults( transcribeArgs.resultFlags, &result ) );
+
+	// logDebug(reinterpret_cast<const char8_t*>(seg.text));
+	sTranscribeLength length;
+	CHECK(result->getSize(length));
+
+	const size_t len = length.countSegments;
+	size_t i = len - n_new;
+
+	const sSegment* const segments = result->getSegments();
+	const sToken* const tokens = result->getTokens();
+	CStringA str;
+	for (; i < len; i++)
+	{
+		const sSegment& seg = segments[i];
+
+		for (uint32_t j = 0; j < seg.countTokens; j++)
+		{
+			const sToken& tok = tokens[seg.firstToken + j];
+			if (tok.flags & eTokenFlags::Special)
+				continue;
+			str += tok.text;
+		}
+		CStringA oldString = appState.currentResult;
+		if (str.Compare(oldString) != 0) {
+			appState.duplicatedResults.clear();
+			appState.currentResult = str;
+			appState.duplicatedSecond = 0;
+		}
+		else {
+			if (appState.duplicatedResults.size() == 0) {
+				Whisper::sTimeSpanFields timeBegin = seg.time.begin;
+				appState.duplicatedSecond = timeBegin.fullSeconds;
+			}
+			appState.duplicatedResults.push_back(str);
+			logInfo(u8"the same %d: %s", appState.duplicatedResults.size(), cstr(str));
+			if (appState.duplicatedResults.size() > 15) {
+				logInfo(u8"force stop!");
+
+				Whisper::sTimeSpanFields timeBegin = seg.time.begin;
+				CString seconds;
+				seconds.Format(_T("%u"), timeBegin.fullSeconds);
+
+				logInfo(u8"the same time final: %u", timeBegin.fullSeconds);
+
+				logInfo(u8"the same time begin: %d", appState.duplicatedSecond);
+				
+				transcribeStartTime.SetWindowText(seconds);
+				transcribeArgs.visualState = eVisualState::Stopping;
+			}
+		}
+	}
+
 	return logNewSegments( result, n_new );
 }
 
