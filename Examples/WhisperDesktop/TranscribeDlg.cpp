@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "TranscribeDlg.h"
 #include "Utils/logger.h"
+#include <regex>
 
 HRESULT TranscribeDlg::show()
 {
@@ -251,6 +252,14 @@ void TranscribeDlg::transcribeError( LPCTSTR text, HRESULT hr )
 	reportError( m_hWnd, text, L"Unable to transcribe audio", hr );
 }
 
+std::string utf8(const std::wstring& utf16)
+{
+	int count = WideCharToMultiByte(CP_UTF8, 0, utf16.c_str(), (int)utf16.length(), nullptr, 0, nullptr, nullptr);
+	std::string str(count, 0);
+	WideCharToMultiByte(CP_UTF8, 0, utf16.c_str(), -1, &str[0], count, nullptr, nullptr);
+	return str;
+}
+
 void TranscribeDlg::onTranscribe()
 {
 	switch( transcribeArgs.visualState )
@@ -285,21 +294,69 @@ void TranscribeDlg::onTranscribe()
 	transcribeArgs.format = (eOutputFormat)(uint8_t)transcribeOutFormat.GetCurSel();
 	if( transcribeArgs.format != eOutputFormat::None )
 	{
-		transcribeStartTime.GetWindowText( transcribeArgs.customStartTime );
-		transcribeEndTime.GetWindowText( transcribeArgs.customEndTime );
+		transcribeStartTime.GetWindowText(transcribeArgs.customStartTimeText);
+		transcribeEndTime.GetWindowText(transcribeArgs.customEndTimeText);
 		transcribeOutputPath.GetWindowText( transcribeArgs.pathOutput );
 		if( transcribeArgs.pathOutput.GetLength() <= 0 )
 		{
 			transcribeError( L"Please select an output text file" );
 			return;
 		}
-		if( PathFileExists( transcribeArgs.pathOutput ) )
+		if (PathFileExists(transcribeArgs.pathOutput))
 		{
-			const int resp = MessageBox( L"The output file is already there.\nOverwrite the file?", L"Confirm Overwrite", MB_ICONQUESTION | MB_YESNO );
-			if( resp != IDYES )
+			const int resp = MessageBox(L"The output file is already there.\nOverwrite the file?", L"Confirm Overwrite", MB_ICONQUESTION | MB_YESNO);
+			if (resp != IDYES)
 				return;
 		}
-		appState.stringStore( regValOutPath, transcribeArgs.pathOutput );
+		appState.stringStore(regValOutPath, transcribeArgs.pathOutput);
+
+		CString startTime = transcribeArgs.customStartTimeText;
+		CString endTime = transcribeArgs.customEndTimeText;
+		std::regex pattern(R"((\d+):(\d+):(\d+)\.(\d+))");
+		std::smatch matches;
+		std::string startTimeString = utf8(startTime.GetString());
+		std::string endTimeString = utf8(endTime.GetString());
+		if (std::regex_match(startTimeString, matches, pattern)) {
+			int hour = std::stoi(matches[1]);
+			int min = std::stoi(matches[2]);
+			int sec = std::stoi(matches[3]);
+			int milli = 0;
+			if (matches[4].length() == 3) {
+				milli = std::stoi(matches[4]);
+			}
+			else if (matches[4].length() == 2) {
+				milli = std::stoi(matches[4]) * 10;
+			}
+			else if (matches[4].length() == 1) {
+				milli = std::stoi(matches[4]) * 100;
+			}
+
+			transcribeArgs.customStartTimeMillis = hour * 60 * 60 * 1000 + min * 60 * 1000 + sec * 1000 + milli * 100;
+		}
+		else {
+			transcribeArgs.customStartTimeMillis = _ttoi(startTime) * 1000;
+		}
+
+		if (std::regex_match(endTimeString, matches, pattern)) {
+			int hour = std::stoi(matches[1]);
+			int min = std::stoi(matches[2]);
+			int sec = std::stoi(matches[3]);
+			int milli = 0;
+			if (matches[4].length() == 3) {
+				milli = std::stoi(matches[4]);
+			}
+			else if (matches[4].length() == 2) {
+				milli = std::stoi(matches[4]) * 10;
+			}
+			else if (matches[4].length() == 1) {
+				milli = std::stoi(matches[4]) * 100;
+			}
+
+			transcribeArgs.customEndTimeMillis = hour * 60 * 60 * 1000 + min * 60 * 1000 + sec * 1000 + milli * 100;
+		}
+		else {
+			transcribeArgs.customEndTimeMillis = _ttoi(endTime) * 1000;
+		}
 	}
 	else
 		cbConsole.ensureChecked();
@@ -426,11 +483,11 @@ HRESULT TranscribeDlg::transcribe()
 	fullParams.encoder_begin_callback = &encoderBeginCallback;
 	fullParams.encoder_begin_callback_user_data = this;
 	
-	int customeStartTime = _ttoi(transcribeArgs.customStartTime);
-	int customeEndTime = _ttoi(transcribeArgs.customEndTime);
-	fullParams.offset_ms = customeStartTime * 1000;
+	int customeStartTime = transcribeArgs.customStartTimeMillis;
+	int customeEndTime = transcribeArgs.customEndTimeMillis;
+	fullParams.offset_ms = customeStartTime;
 	if (customeEndTime > customeStartTime) {
-		fullParams.duration_ms = (customeEndTime - customeStartTime) * 1000;
+		fullParams.duration_ms = (customeEndTime - customeStartTime);
 	}
 	else {
 		fullParams.duration_ms = 0;
@@ -438,7 +495,7 @@ HRESULT TranscribeDlg::transcribe()
 
 	// Setup Audio Reader
 	CComPtr<iAudioReader> reader;
-	CHECK_EX(appState.mediaFoundation->openAudioFile(transcribeArgs.pathMedia, false, &reader, customeStartTime * 1000));
+	CHECK_EX(appState.mediaFoundation->openAudioFile(transcribeArgs.pathMedia, false, &reader, customeStartTime));
 
 	// Setup the progress indication sink
 	sProgressSink progressSink{ &progressCallbackStatic, this };

@@ -116,8 +116,10 @@ private:
 		uint64_t startTime;
 		int64_t mediaDuration;
 		CString errorMessage;
-		CString customStartTime;
-		CString customEndTime;
+		CString customStartTimeText;
+		CString customEndTimeText;
+		int customStartTimeMillis;
+		int customEndTimeMillis;
 	};
 	TranscribeArgs transcribeArgs;
 
