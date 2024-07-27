@@ -2,6 +2,8 @@
 #include "TranscribeDlg.h"
 #include "Utils/logger.h"
 #include <regex>
+#include <iostream>
+#include <filesystem>
 
 HRESULT TranscribeDlg::show()
 {
@@ -304,9 +306,36 @@ void TranscribeDlg::onTranscribe()
 		}
 		if (PathFileExists(transcribeArgs.pathOutput))
 		{
-			const int resp = MessageBox(L"The output file is already there.\nOverwrite the file?", L"Confirm Overwrite", MB_ICONQUESTION | MB_YESNO);
-			if (resp != IDYES)
-				return;
+			const int resp = MessageBox(L"The output file is already there.\nadd subfix to file name?", L"Confirm New File", MB_ICONQUESTION | MB_YESNO);
+			if (resp == IDYES) {
+				std::wstring myPath((LPCTSTR)transcribeArgs.pathOutput);
+				std::wstring fileName = std::filesystem::path(myPath).filename();
+				std::wstring fileExtension = std::filesystem::path(myPath).extension();
+				std::wregex pattern(LR"(.*\((\d+)\)\.(.*))");
+			
+				std::wsmatch match;
+				if (std::regex_match(fileName, match, pattern)) {
+					int number = std::stoi(match.str(1));
+
+					CString oldFileExtension;
+					oldFileExtension.Format(_T("(%d)%s"), number, fileExtension.c_str());
+
+					CString newFileExtension;
+					newFileExtension.Format(_T("(%d)%s"), number+1, fileExtension.c_str());
+
+					transcribeArgs.pathOutput.Replace(oldFileExtension, newFileExtension);
+					transcribeOutputPath.SetWindowText(transcribeArgs.pathOutput);
+				} else {
+					CString newFileExtension;
+					newFileExtension.Format(_T("(2)%s"), fileExtension.c_str());
+					transcribeArgs.pathOutput.Replace(fileExtension.c_str(), newFileExtension);
+					transcribeOutputPath.SetWindowText(transcribeArgs.pathOutput);
+				}
+			} else {
+				const int resp = MessageBox(L"The output file is already there.\nOverwrite the file?", L"Confirm Overwrite", MB_ICONQUESTION | MB_YESNO);
+				if (resp != IDYES)
+					return;
+			}
 		}
 		appState.stringStore(regValOutPath, transcribeArgs.pathOutput);
 
