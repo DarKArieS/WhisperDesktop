@@ -63,11 +63,11 @@ HRESULT logNewSegments( const iTranscribeResult* results, size_t newSegments, bo
 	for( ; i < len; i++ )
 	{
 		const sSegment& seg = segments[ i ];
-		str = "[";
+		str = "[ ";
 		printTime( str, seg.time.begin, false, true );
 		str += " --> ";
 		printTime( str, seg.time.end, false, true );
-		str += "]  ";
+		str += " ]  ";
 
 		for( uint32_t j = 0; j < seg.countTokens; j++ )
 		{

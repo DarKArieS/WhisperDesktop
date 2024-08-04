@@ -360,7 +360,7 @@ void TranscribeDlg::onTranscribe()
 				milli = std::stoi(matches[4]) * 100;
 			}
 
-			transcribeArgs.customStartTimeMillis = hour * 60 * 60 * 1000 + min * 60 * 1000 + sec * 1000 + milli * 100;
+			transcribeArgs.customStartTimeMillis = hour * 60 * 60 * 1000 + min * 60 * 1000 + sec * 1000 + milli;
 		}
 		else {
 			transcribeArgs.customStartTimeMillis = _ttoi(startTime) * 1000;
@@ -467,7 +467,7 @@ LRESULT TranscribeDlg::onCallbackStatus( UINT, WPARAM wParam, LPARAM, BOOL& bHan
 	double mul = (double)media / (double)elapsed;
 	message.AppendFormat( L"%g", mul );
 
-	MessageBox( message, L"Transcribe Completed", MB_OK | MB_ICONINFORMATION );
+	// MessageBox( message, L"Transcribe Completed", MB_OK | MB_ICONINFORMATION );
 	return 0;
 }
 
@@ -745,7 +745,7 @@ inline HRESULT TranscribeDlg::newSegmentCallback( Whisper::iContext* ctx, uint32
 
 				logInfo(u8"the same time begin: %d", appState.duplicatedSecond);
 				
-				transcribeStartTime.SetWindowText(seconds);
+				// transcribeStartTime.SetWindowText(seconds);
 				transcribeArgs.visualState = eVisualState::Stopping;
 			}
 		}
