@@ -2,6 +2,7 @@
 #include "ContextImpl.h"
 #include "Languages.h"
 #include "../Utils/Trace/tracing.h"
+#include <random>
 using namespace Whisper;
 
 ContextImpl::ContextImpl( const DirectCompute::Device& dev, const WhisperModel& modelData, iModel* modelPointer ) :
@@ -13,6 +14,8 @@ ContextImpl::ContextImpl( const DirectCompute::Device& dev, const WhisperModel& 
 { }
 
 #define WHISPER_CHUNK_SIZE  30
+
+#define WHISPER_MAX_DECODERS 8
 
 HRESULT ContextImpl::encode( iSpectrogram& mel, int seek )
 {
@@ -31,10 +34,23 @@ HRESULT ContextImpl::encode( iSpectrogram& mel, int seek )
 	ep.n_text_state = model.parameters.n_text_state;
 	ep.n_text_layer = model.parameters.n_text_layer;
 	ep.n_text_ctx = model.parameters.n_text_ctx;
+	/*logInfo(u8"---- encode parameter for the model: -----");
+	logInfo(u8"n_ctx: %d", ep.n_ctx);
+	logInfo(u8"n_mels: %d", ep.n_mels);
+	logInfo(u8"layersCount: %d", ep.layersCount);
+	logInfo(u8"n_state: %d", ep.n_state);
+	logInfo(u8"n_head: %d", ep.n_head);
+	logInfo(u8"n_audio_ctx: %d", ep.n_audio_ctx);
+	logInfo(u8"n_text_state: %d", ep.n_text_state);
+	logInfo(u8"n_text_layer: %d", ep.n_text_layer);
+	logInfo(u8"n_text_ctx: %d", ep.n_text_ctx);
+	logInfo(u8"------------------------------------------");*/
+	
 	try
 	{
 		auto cur = context.encode( mel, ep );
-		Tracing::tensor( "encode-out", cur );
+		logInfo(u8"encode done");
+		// Tracing::tensor( "encode-out", cur );
 		return S_OK;
 	}
 	catch( HRESULT hr )
@@ -43,7 +59,7 @@ HRESULT ContextImpl::encode( iSpectrogram& mel, int seek )
 	}
 }
 
-HRESULT ContextImpl::decode( const int* tokens, size_t length, int n_past, int threads )
+HRESULT ContextImpl::decode( const int* prompt_tokens, size_t prompt_length, int n_past, int threads )
 {
 	// whisper_decode
 	using namespace DirectCompute;
@@ -58,7 +74,7 @@ HRESULT ContextImpl::decode( const int* tokens, size_t length, int n_past, int t
 
 	try
 	{
-		context.decode( tokens, (int)length, dp, probs, threads );
+		context.decode(prompt_tokens, (int)prompt_length, dp, probs, threads );
 		return S_OK;
 	}
 	catch( HRESULT hr )
@@ -473,6 +489,53 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 	if( seek_end < 100 + seek_start )
 		return S_FALSE;
 
+	// a set of temperatures to use
+	// [ t0, t0 + delta, t0 + 2*delta, ..., < 1.0f + 1e-6f ]
+	std::vector<float> temperatures;
+	if (params.temperature_inc > 0.0f) {
+		for (float t = params.temperature; t < 1.0f + 1e-6f; t += params.temperature_inc) {
+			temperatures.push_back(t);
+		}
+	}
+	else {
+		temperatures.push_back(params.temperature);
+	}
+
+	// initialize the decoders
+	int n_decoders = 1;
+
+	switch (params.strategy) {
+	case Whisper::eSamplingStrategy::Greedy:
+	{
+		n_decoders = params.greedy.best_of;
+	} break;
+	case Whisper::eSamplingStrategy::BeamSearch:
+	{
+		n_decoders = std::max(params.greedy.best_of, params.beam_search.beam_size);
+	} break;
+	};
+
+	n_decoders = std::max(1, n_decoders);
+
+	if (n_decoders > WHISPER_MAX_DECODERS) {
+		// WHISPER_LOG_ERROR("%s: too many decoders requested (%d), max = %d\n", __func__, n_decoders, WHISPER_MAX_DECODERS);
+		return S_FALSE;
+	}
+
+	// TAGS: WHISPER_DECODER_INIT
+	//for (int j = 1; j < n_decoders; j++) {
+	//	auto& decoder = state->decoders[j];
+
+	//	decoder.sequence.tokens.reserve(state->decoders[0].sequence.tokens.capacity());
+
+	//	decoder.probs.resize(ctx->vocab.n_vocab);
+	//	decoder.logits.resize(ctx->vocab.n_vocab);
+	//	decoder.logprobs.resize(ctx->vocab.n_vocab);
+	//	decoder.logits_id.reserve(ctx->model.hparams.n_vocab);
+
+	//	decoder.rng = std::mt19937(0);
+	//}
+
 	// the accumulated text context so far
 	if( params.flag( eFullParamsFlags::NoContext ) )
 		prompt_past.clear();
@@ -531,6 +594,8 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 
 	while( true )
 	{
+		context.clearState();
+
 		if( nullptr != progress.pfn )
 		{
 			const int pos = seek - seek_start;
@@ -542,6 +607,10 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 
 		if( seek + 100 >= seek_end )
 			break;
+
+		logInfo(u8"===============================================");
+		logInfo(u8"|                  seek: %d                    |", seek);
+		logInfo(u8"===============================================");
 
 		if( nullptr != params.encoder_begin_callback )
 		{
@@ -563,27 +632,27 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		prompt.clear();
 
 		// if we have already generated some text, use it as a prompt to condition the next generation
-		if( !prompt_past.empty() )
-		{
-			int n_take = std::min( std::min( params.n_max_text_ctx, model.parameters.n_text_ctx / 2 ), int( prompt_past.size() ) );
+		//if( !prompt_past.empty() )
+		//{
+		//	int n_take = std::min( std::min( params.n_max_text_ctx, model.parameters.n_text_ctx / 2 ), int( prompt_past.size() ) );
 
-			prompt = { vocab.token_prev };
-			prompt.insert( prompt.begin() + 1, prompt_past.end() - n_take, prompt_past.end() );
+		//	prompt = { vocab.token_prev };
+		//	prompt.insert( prompt.begin() + 1, prompt_past.end() - n_take, prompt_past.end() );
 
-			prompt_past.clear();
-			prompt_past.insert( prompt_past.end(), prompt.begin() + 1, prompt.end() );
-		}
+		//	prompt_past.clear();
+		//	prompt_past.insert( prompt_past.end(), prompt.begin() + 1, prompt.end() );
+		//}
 
 		prompt.insert( prompt.end(), prompt_init.begin(), prompt_init.end() );
+
+		// logInfo(u8"prompt size: %zu", prompt.size());
 
 		int seek_delta = 100 * WHISPER_CHUNK_SIZE;
 
 		// print the prompt
-		//printf("\n\n");
-		//for (int i = 0; i < prompt.size(); i++) {
-		//    printf("%s: prompt[%d] = %s\n", __func__, i, ctx->vocab.id_to_token[prompt[i]].c_str());
-		//}
-		//printf("\n\n");
+		// for (int i = 0; i < prompt.size(); i++) {
+		// 	logInfo(u8"prompt[%d] = %s\n", i, vocab.string(prompt[i]));
+		// }
 
 		// the accumulated transcription in the current iteration
 		int result_len = 0;
@@ -592,11 +661,13 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		bool failed = false;
 		bool has_ts = false; // have we already sampled a non-beg timestamp token for the current segment?
 
+		logInfo(u8" >>> Start Decode <<<");
 		{
 			// Measure "Decode" profiler value, both CPU and GPU times
 			auto prof = context.decodeProfiler();
 			for( int i = 0, n_max = model.parameters.n_text_ctx / 2 - 4; i < n_max; i++ )
 			{
+				// logInfo(u8"decode loop: %d / %d, with n_past: %d", i, n_max, n_past);
 				CHECK( decode( prompt.data(), prompt.size(), n_past, params.cpuThreads ) );
 
 				n_past += (int)prompt.size();
@@ -613,14 +684,23 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 					auto p = profiler.cpuBlock( eCpuBlock::Sample );
 					const sTokenData token = ( i == 0 ) ? sampleTimestamp( true ) : sampleBest();
 
+					// logInfo(u8"get Token vlen: %f", token.vlen);
+					//logInfo(u8"get Token (id): %s n_past: %d ", vocab.string(token.id), n_past);
+
 					// timestamp token - update sliding window
 					if( token.id > vocab.token_beg )
 					{
 						const int seek_delta_new = 2 * ( token.id - vocab.token_beg );
-
+						//logInfo(u8"=====");
+						//logInfo(u8"this token is time stamp, delta: %d", seek_delta_new);
+						
 						// do not allow to go back in time
-						if( has_ts && seek_delta > seek_delta_new && result_len < i )
+						if (has_ts && seek_delta > seek_delta_new && result_len < i) {
+							logInfo(u8"do not allow to go back in time");
 							break;
+						}
+
+						//logInfo(u8"=====");
 
 						seek_delta = seek_delta_new;
 						result_len = i + 1;
@@ -642,6 +722,7 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 						( has_ts && seek + seek_delta + 100 >= seek_end )     // end of audio reached
 						)
 					{
+						logInfo(u8"end of segment!");
 						if( result_len == 0 )
 						{
 							if( seek + seek_delta + 100 >= seek_end )
@@ -669,15 +750,16 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 				if( i == n_max - 1 && ( result_len == 0 || seek_delta < 100 * WHISPER_CHUNK_SIZE / 2 ) )
 				{
 					failed = true;
+					logInfo(u8"do not find end of segment!");
 					break;
 				}
 			}
 		}
 		if( failed )
 		{
-			logError( u8"%s: failed to generate timestamp token - skipping one second", __func__ );
-			seek += 100;
-			continue;
+			//logError( u8"%s: failed to generate timestamp token - skipping one second", __func__ );
+			//seek += 100;
+			//continue;
 		}
 
 		// shrink down to result_len
@@ -689,8 +771,14 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		// store the text from this iteration
 		if( !tokens_cur.empty() )
 		{
-			int i0 = 0;
+			/*int n_ctx = (exp_n_audio_ctx > 0) ? exp_n_audio_ctx : model.parameters.n_audio_ctx;
+			if (seek_delta < n_ctx) {
+				seek = seek + 2 * n_ctx - seek_delta;
+			}*/
+
+			int i0 = 0; 
 			int t0 = seek + 2 * ( tokens_cur.front().tid - vocab.token_beg );
+
 			std::string text = "";
 
 			for( int i = 0; i < (int)tokens_cur.size(); i++ )
@@ -782,6 +870,13 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 						return hr;
 				}
 			}
+		}
+		else if (failed) { 
+			int t0 = seek;
+			int t1 = seek + seek_delta / 2;
+			result_all.push_back({ t0, t1, "do not find segment!", {}});
+			seek += seek_delta / 2;
+			continue;
 		}
 		seek += seek_delta;
 	}

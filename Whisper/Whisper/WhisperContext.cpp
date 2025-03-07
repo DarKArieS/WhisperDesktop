@@ -633,8 +633,10 @@ void WhisperContext::decode( const int* tokens, const int n_tokens, const sDecod
 
 	decoderOutput.copyFromVram( cur );
 	assert( decoderOutput.size() == N * decParams.n_vocab );
-
+	
 	decoderOutput.copyToVector( probs );
+
+	// logInfo(u8"decode result probs size: %d", probs.size());
 	Tracing::vector( "probs", probs );
 }
 

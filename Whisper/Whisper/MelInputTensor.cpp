@@ -36,6 +36,8 @@ HRESULT MelInputTensor::create( Whisper::iSpectrogram& spectrogram, const sEncod
 		const size_t n_len = spectrogram.getLength();
 		const size_t i0 = std::min( (size_t)encParams.mel_offset, n_len );
 		const size_t i1 = std::min( (size_t)encParams.mel_offset + 2 * encParams.n_ctx, n_len );
+		// logInfo(u8"MelInputTensor.cpp load audio to buffer: n_len: %zu, mel_offset: %d, n_ctx: %d", n_len, encParams.mel_offset, encParams.n_ctx);
+		logInfo(u8"MelInputTensor.cpp load audio %zu - %zu (s)", i0, i1);
 
 		// Whisper::MelBufferRaii sourceBuffer{ spectrogram, i0, i1 - i0 };
 		constexpr DWORD n_mel = Whisper::N_MEL;
@@ -50,6 +52,7 @@ HRESULT MelInputTensor::create( Whisper::iSpectrogram& spectrogram, const sEncod
 
 		Whisper::MelBufferRaii sourceBuffer;
 		CHECK( sourceBuffer.make( spectrogram, i0, i1 - i0 ) );
+		
 		CHECK( MFCopyImage(
 			(BYTE*)dst, (LONG)( 2 * encParams.n_ctx * sizeof( float ) ),
 			sourceBuffer.bytePtr(), sourceBuffer.strideBytes(),

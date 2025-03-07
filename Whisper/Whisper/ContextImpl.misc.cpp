@@ -76,14 +76,14 @@ HRESULT COMLIGHTCALL ContextImpl::fullDefaultParams( eSamplingStrategy strategy,
 	switch( strategy )
 	{
 	case eSamplingStrategy::Greedy:
-		rdi->beam_search.n_past = -1;
-		rdi->beam_search.beam_width = -1;
-		rdi->beam_search.n_best = -1;
+		rdi->greedy.best_of = 5;
+		rdi->beam_search.beam_size = -1;
+		rdi->beam_search.patience = -1.0f;
 		break;
 	case eSamplingStrategy::BeamSearch:
-		rdi->greedy.n_past = -1;
-		rdi->beam_search.beam_width = 10;
-		rdi->beam_search.n_best = 5;
+		rdi->greedy.best_of = -1;
+		rdi->beam_search.beam_size = 5;
+		rdi->beam_search.patience = -1.0f;
 		break;
 	default:
 		logError( u8"Unknown sampling strategy %i", (int)strategy );
@@ -403,11 +403,13 @@ HRESULT COMLIGHTCALL ContextImpl::runStreamed( const sFullParams& params, const 
 	{
 		if( params.cpuThreads > 1 )
 		{
+			logInfo(u8"runFullImpl with %d CPU Threads", params.cpuThreads);
 			MelStreamerThread mel{ model.shared->filters, profiler, reader, params.cpuThreads };
 			return runFullImpl( params, progress, mel );
 		}
 		else
 		{
+			logInfo(u8"runFullImpl with one CPU Thread");
 			MelStreamerSimple mel{ model.shared->filters, profiler, reader };
 			return runFullImpl( params, progress, mel );
 		}
