@@ -508,8 +508,8 @@ HRESULT TranscribeDlg::transcribe()
 	fullParams.language = transcribeArgs.language;
 	fullParams.setFlag( eFullParamsFlags::Translate, transcribeArgs.translate );
 	//fullParams.setFlag( eFullParamsFlags::TokenTimestamps, true);
-	//fullParams.setFlag( eFullParamsFlags::SingleSegment, true);
-	//fullParams.setFlag( eFullParamsFlags::NoContext, true);
+	// fullParams.setFlag( eFullParamsFlags::SingleSegment, true);
+	fullParams.setFlag( eFullParamsFlags::NoContext, true);
 	fullParams.resetFlag( eFullParamsFlags::PrintRealtime );
 
 	// Setup the callbacks
@@ -650,7 +650,7 @@ HRESULT TranscribeDlg::writeSubRip( const sSegment* const segments, const size_t
 
 	logInfo(u8"total lines : %d", length);
 	logInfo(u8"remove dup lines : %d", dupLines);
-
+	
 	if (length - dupLines <= 0) {
 		return S_OK;
 	}

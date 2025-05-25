@@ -309,6 +309,7 @@ void WhisperContext::createKeyValueBuffers( const sEncodeParams& encParams )
 
 Tensor WhisperContext::encode( Whisper::iSpectrogram& spectrogram, const sEncodeParams& encParams )
 {
+	logInfo(u8"start encode");
 	auto prof = profiler.block( eProfilerBlock::Encode );
 	CaptureRaii renderdocCapture;
 	profiler.profileShaders = profileEncodeShaders;

@@ -781,6 +781,12 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 
 			std::string text = "";
 
+			// repeat detect
+			std::string repeat_text = "";
+			int repeatTimes = 0;
+			int repeatIndex = -1;
+			std::vector<Segment> chunk_result;
+
 			for( int i = 0; i < (int)tokens_cur.size(); i++ )
 			{
 				//printf("%s: %18s %6.3f %18s %6.3f\n", __func__,
@@ -806,25 +812,23 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 								logDebug( u8"%s", text.c_str() );
 						}
 
-						result_all.push_back( { tt0, tt1, text, {} } );
+						// repeat process
+						if (repeat_text.compare(text) == 0) {
+							if (repeatTimes == 0) {
+								repeatIndex = chunk_result.size() - 1;
+							}
+							
+							repeatTimes += 1;
+						}
+						else {
+							repeatIndex = -1;
+							repeat_text = text;
+							repeatTimes = 0;
+						}
+
+						chunk_result.push_back( { tt0, tt1, text, {} } );
 						for( int j = i0; j <= i; j++ )
-							result_all.back().tokens.push_back( tokens_cur[ j ] );
-
-						int n_new = 1;
-
-						if( params.flag( eFullParamsFlags::TokenTimestamps ) )
-						{
-							expComputeTokenLevelTimestamps( (int)result_all.size() - 1, params.thold_pt, params.thold_ptsum );
-							if( params.max_len > 0 )
-								n_new = wrapSegment( params.max_len );
-						}
-						if( nullptr != params.new_segment_callback )
-						{
-							auto cb = profiler.cpuBlock( eCpuBlock::Callbacks );
-							HRESULT hr = params.new_segment_callback( this, n_new, params.new_segment_callback_user_data );
-							if( FAILED( hr ) )
-								return hr;
-						}
+							chunk_result.back().tokens.push_back( tokens_cur[ j ] );
 					}
 					text = "";
 					while( i < (int)tokens_cur.size() && tokens_cur[ i ].id > vocab.token_beg )
@@ -835,49 +839,71 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 				}
 			}
 
-			if( !text.empty() )
-			{
-				const int t1 = seek + seek_delta;
+			// write result
+			if (repeatTimes > 9) {
+				logDebug(u8"repeat times: %d -> retry", repeatTimes);
+				int t0 = seek;
+				if (repeatIndex > 0) {
+					logDebug(u8"retry after time %d", chunk_result[repeatIndex].t1);
 
-				const bool speedUp = params.flag( eFullParamsFlags::SpeedupAudio );
-				const int tt0 = speedUp ? 2 * t0 : t0;
-				const int tt1 = speedUp ? 2 * t1 : t1;
+					for (int i = 0; i <= repeatIndex; i++) {
+						result_all.push_back(chunk_result[i]);
+						int n_new = 1;
 
-				if( params.flag( eFullParamsFlags::PrintRealtime ) )
-				{
-					if( params.flag( eFullParamsFlags::PrintTimestamps ) )
-						logDebug( u8"[%s --> %s]  %s", to_timestamp( tt0 ).c_str(), to_timestamp( tt1 ).c_str(), text.c_str() );
-					else
-						logDebug( u8"%s", text.c_str() );
+						/*if( params.flag( eFullParamsFlags::TokenTimestamps ) )
+						{
+							expComputeTokenLevelTimestamps( (int)result_all.size() - 1, params.thold_pt, params.thold_ptsum );
+							if( params.max_len > 0 )
+								n_new = wrapSegment( params.max_len );
+						}*/
+						if (nullptr != params.new_segment_callback)
+						{
+							auto cb = profiler.cpuBlock(eCpuBlock::Callbacks);
+							HRESULT hr = params.new_segment_callback(this, n_new, params.new_segment_callback_user_data);
+							if (FAILED(hr))
+								return hr;
+						}
+					}
+
+					t0 = chunk_result[repeatIndex].t1;
 				}
+				int t1 = t0 + 500;
 
-				result_all.push_back( { tt0, tt1, text, {} } );
-				for( int j = i0; j < (int)tokens_cur.size(); j++ )
-					result_all.back().tokens.push_back( tokens_cur[ j ] );
+				result_all.push_back({ t0, t1, "repeat too many times! jump...", {} });
+				seek = t1;
+				continue;
+			}
+			else {
+				logDebug(u8"repeat times: %d", repeatTimes);
 
-				int n_new = 1;
-				if( params.flag( eFullParamsFlags::TokenTimestamps ) )
-				{
-					expComputeTokenLevelTimestamps( (int)result_all.size() - 1, params.thold_pt, params.thold_ptsum );
-					if( params.max_len > 0 )
-						n_new = wrapSegment( params.max_len );
-				}
-				if( nullptr != params.new_segment_callback )
-				{
-					auto cb = profiler.cpuBlock( eCpuBlock::Callbacks );
-					HRESULT hr = params.new_segment_callback( this, n_new, params.new_segment_callback_user_data );
-					if( FAILED( hr ) )
-						return hr;
+				for (int i = 0; i < (int)chunk_result.size(); i++) {
+					result_all.push_back(chunk_result[i]);
+					int n_new = 1;
+
+					/*if( params.flag( eFullParamsFlags::TokenTimestamps ) )
+					{
+						expComputeTokenLevelTimestamps( (int)result_all.size() - 1, params.thold_pt, params.thold_ptsum );
+						if( params.max_len > 0 )
+							n_new = wrapSegment( params.max_len );
+					}*/
+					if (nullptr != params.new_segment_callback)
+					{
+						auto cb = profiler.cpuBlock(eCpuBlock::Callbacks);
+						HRESULT hr = params.new_segment_callback(this, n_new, params.new_segment_callback_user_data);
+						if (FAILED(hr))
+							return hr;
+					}
 				}
 			}
 		}
 		else if (failed) { 
 			int t0 = seek;
-			int t1 = seek + seek_delta / 2;
+			int t1 = seek + 500;
 			result_all.push_back({ t0, t1, "do not find segment!", {}});
-			seek += seek_delta / 2;
+			seek += 500;
 			continue;
 		}
+		
 		seek += seek_delta;
 	}
 
