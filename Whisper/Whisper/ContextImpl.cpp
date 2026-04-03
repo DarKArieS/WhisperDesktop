@@ -840,7 +840,7 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 			}
 
 			// write result
-			if (repeatTimes > 9) {
+			if (repeatTimes > 5) {
 				logDebug(u8"repeat times: %d -> retry", repeatTimes);
 				int t0 = seek;
 				if (repeatIndex > 0) {
