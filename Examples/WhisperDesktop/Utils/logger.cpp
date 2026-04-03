@@ -2,27 +2,7 @@
 #include "logger.h"
 #include "miscUtils.h"
 
-namespace
-{
-	using namespace Whisper;
-
-	// Terminal color map. 10 colors grouped in ranges [0.0, 0.1, ..., 0.9]
-	// Lowest is red, middle is yellow, highest is green.
-	static const std::array<const char*, 10> k_colors =
-	{
-		"\033[38;5;196m", "\033[38;5;202m", "\033[38;5;208m", "\033[38;5;214m", "\033[38;5;220m",
-		"\033[38;5;226m", "\033[38;5;190m", "\033[38;5;154m", "\033[38;5;118m", "\033[38;5;82m",
-	};
-
-	static int colorIndex( const sToken& tok )
-	{
-		const float p = tok.probability;
-		const float p3 = p * p * p;
-		int col = (int)( p3 * float( k_colors.size() ) );
-		col = std::max( 0, std::min( (int)k_colors.size() - 1, col ) );
-		return col;
-	}
-}
+using namespace Whisper;
 
 void printTime( CStringA& rdi, Whisper::sTimeSpan time, bool comma, bool printFullSeconds )
 {
@@ -67,17 +47,36 @@ HRESULT logNewSegments( const iTranscribeResult* results, size_t newSegments, bo
 		printTime( str, seg.time.begin, false, true );
 		str += " --> ";
 		printTime( str, seg.time.end, false, true );
+
+		// Compute average token probability and average timestamp token probability
+		if (tokens != nullptr && seg.countTokens > 0)
+		{
+			float sumProb = 0.0f;
+			float sumProbTs = 0.0f;
+			uint32_t count = 0;
+			for (uint32_t t = seg.firstToken; t < seg.firstToken + seg.countTokens; t++)
+			{	
+				const sToken& tok = tokens[t];
+
+			
+				if (!printSpecial && (tok.flags & eTokenFlags::Special))
+					continue;
+				sumProb += tok.probability;
+				// sumProbTs += tok.probabilityTimestamp;
+				// logInfo(u8"%.3f,%.3f,%.3f,%.3f", tok.probability, tok.probabilityTimestamp, tok.ptsum, tok.vlen);
+
+				count++;
+			}
+			if (count > 0)
+			{
+				str.AppendFormat("p=%.3f", sumProb / count);
+			}
+		}
+
 		str += " ]  ";
 
-		for( uint32_t j = 0; j < seg.countTokens; j++ )
-		{
-			const sToken& tok = tokens[ seg.firstToken + j ];
-			if( !printSpecial && ( tok.flags & eTokenFlags::Special ) )
-				continue;
-			str += k_colors[ colorIndex( tok ) ];
-			str += tok.text;
-			str += "\033[0m";
-		}
+		str += seg.text;
+
 		logInfo( u8"%s", cstr( str ) );
 	}
 
