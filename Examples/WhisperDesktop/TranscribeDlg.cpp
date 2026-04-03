@@ -4,6 +4,7 @@
 #include <regex>
 #include <iostream>
 #include <filesystem>
+#include <shellapi.h>
 
 HRESULT TranscribeDlg::show()
 {
@@ -306,8 +307,8 @@ void TranscribeDlg::onTranscribe()
 		}
 		if (PathFileExists(transcribeArgs.pathOutput))
 		{
-			const int resp = MessageBox(L"The output file is already there.\nadd subfix to file name?", L"Confirm New File", MB_ICONQUESTION | MB_YESNO);
-			if (resp == IDYES) {
+			// const int resp = MessageBox(L"The output file is already there.\nadd subfix to file name?", L"Confirm New File", MB_ICONQUESTION | MB_YESNO);
+			if (true) {
 				std::wstring myPath((LPCTSTR)transcribeArgs.pathOutput);
 				std::wstring fileName = std::filesystem::path(myPath).filename();
 				std::wstring fileExtension = std::filesystem::path(myPath).extension();
@@ -468,6 +469,11 @@ LRESULT TranscribeDlg::onCallbackStatus( UINT, WPARAM wParam, LPARAM, BOOL& bHan
 	message.AppendFormat( L"%g", mul );
 
 	// MessageBox( message, L"Transcribe Completed", MB_OK | MB_ICONINFORMATION );
+
+	// Auto-open the output file after successful transcription
+	if( transcribeArgs.format != eOutputFormat::None && transcribeArgs.pathOutput.GetLength() > 0 )
+		ShellExecute( m_hWnd, L"open", transcribeArgs.pathOutput, nullptr, nullptr, SW_SHOWNORMAL );
+
 	return 0;
 }
 
