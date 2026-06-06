@@ -117,6 +117,16 @@ HRESULT Vocabulary::load( ComLight::iReadStream* stm, int lengthInHeader )
 		token_beg++;
 	};
 
+	if( n_vocab >= 51866 )
+	{
+		token_translate++;
+		token_transcribe++;
+		token_prev++;
+		token_solm++;
+		token_not++;
+		token_beg++;
+	}
+
 	if( countWords < lengthInHeader )
 	{
 		for( int i = countWords; i < lengthInHeader; i++ )
@@ -127,6 +137,10 @@ HRESULT Vocabulary::load( ComLight::iReadStream* stm, int lengthInHeader )
 				tokens[ i ] = "[_EOT_]";
 			else if( i == token_sot )
 				tokens[ i ] = "[_SOT_]";
+          else if( i == token_translate )
+				tokens[ i ] = "[_TRANSLATE_]";
+			else if( i == token_transcribe )
+				tokens[ i ] = "[_TRANSCRIBE_]";
 			else if( i == token_prev )
 				tokens[ i ] = "[_PREV_]";
 			else if( i == token_not )

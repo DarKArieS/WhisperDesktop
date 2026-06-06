@@ -10,9 +10,11 @@ namespace Whisper
 
 	__interface iSpectrogram
 	{
-		// Make a buffer with length * N_MEL floats, starting at the specified offset
+       // Make a buffer with length * getMelCount() floats, starting at the specified offset
 		// An implementation of this interface may visualize the spectrogram, making pieces on demand
 		HRESULT makeBuffer( size_t offset, size_t length, const float** buffer, size_t& stride );
+
+		size_t getMelCount() const;
 
 		// Apparently, the length unit is 160 input samples = 10 milliseconds of audio
 		size_t getLength() const;
@@ -27,16 +29,18 @@ namespace Whisper
 	{
 		const float* pointer;
 		size_t stride;
+     size_t melCount;
 	public:
 
 		HRESULT make( iSpectrogram& mel, size_t off, size_t len )
 		{
+            melCount = mel.getMelCount();
 			return mel.makeBuffer( off, len, &pointer, stride );
 		}
 
 		const float* operator[]( size_t idx ) const
 		{
-			assert( idx < N_MEL );
+          assert( idx < melCount );
 			return pointer + idx * stride;
 		}
 

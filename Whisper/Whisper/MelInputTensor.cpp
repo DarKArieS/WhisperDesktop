@@ -40,7 +40,10 @@ HRESULT MelInputTensor::create( Whisper::iSpectrogram& spectrogram, const sEncod
 		logInfo(u8"MelInputTensor.cpp load audio %zu - %zu (s)", i0, i1);
 
 		// Whisper::MelBufferRaii sourceBuffer{ spectrogram, i0, i1 - i0 };
-		constexpr DWORD n_mel = Whisper::N_MEL;
+     const size_t sourceMelCount = spectrogram.getMelCount();
+		if( sourceMelCount != encParams.n_mels )
+			return E_UNEXPECTED;
+		const DWORD n_mel = (DWORD)sourceMelCount;
 		const size_t rowBytes = ( i1 - i0 ) * 4;
 		/*
 		for( size_t j = 0; j < n_mel; j++ )

@@ -17,7 +17,7 @@ namespace Whisper
 	protected:
 		PcmReader reader;
 		std::deque<PcmMonoChunk> queuePcmMono;
-		using MelChunk = std::array<float, N_MEL>;
+      using MelChunk = std::vector<float>;
 		std::deque<MelChunk> queueMel;
 		size_t streamStartOffset = 0;
 		std::vector<float> tempPcm;
@@ -26,6 +26,7 @@ namespace Whisper
 		bool readerEof = false;
 		ProfileCollection& profiler;
 		std::deque<PcmStereoChunk> queuePcmStereo;
+		const uint32_t melCount;
 
 		// If the streamStartOffset value is less than the argument,
 		// remove ( off - streamStartOffset ) chunks from the start of all 3 queues, and advance streamStartOffset to the `off` argument
@@ -42,6 +43,8 @@ namespace Whisper
 		size_t lastBufferEnd = ~(size_t)0;
 		float lastBufferMax = 0.0f;
 		void makeTransposedBuffer( size_t off, size_t len );
+
+     size_t getMelCount() const noexcept override final { return melCount; }
 
 		size_t getLength() const noexcept override final { return reader.getLength(); }
 

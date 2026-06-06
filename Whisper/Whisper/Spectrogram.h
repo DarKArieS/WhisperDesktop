@@ -12,7 +12,7 @@ namespace Whisper
 	class Spectrogram: public iSpectrogram
 	{
 		uint32_t length = 0;
-		static constexpr uint32_t mel = N_MEL;
+      uint32_t mel = 0;
 		std::vector<float> data;
 		std::vector<StereoSample> stereo;
 
@@ -30,6 +30,11 @@ namespace Whisper
 		HRESULT copyStereoPcm( size_t offset, size_t length, std::vector<StereoSample>& buffer ) const override final;
 
 	public:
+        size_t getMelCount() const noexcept override final
+		{
+			return mel;
+		}
+
 		size_t getLength() const noexcept override final
 		{
 			return length;

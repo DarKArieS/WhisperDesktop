@@ -59,6 +59,45 @@ HRESULT ContextImpl::encode( iSpectrogram& mel, int seek )
 	}
 }
 
+HRESULT ContextImpl::detectLanguage( iSpectrogram& mel, int seek, int threads, uint32_t& language )
+{
+	const Vocabulary& vocab = model.shared->vocab;
+	CHECK( encode( mel, seek ) );
+
+	const whisper_token prompt[] = { vocab.token_sot };
+	CHECK( decode( prompt, _countof( prompt ), 0, threads ) );
+
+	if( probs.size() < vocab.n_vocab )
+		return E_UNEXPECTED;
+
+	const float* const decoderProbs = probs.data() + ( probs.size() - vocab.n_vocab );
+	Whisper::sLanguageList list;
+	CHECK( getSupportedLanguages( list ) );
+
+	float bestProb = -INFINITY;
+		uint32_t bestLanguage = UINT_MAX;
+	for( size_t i = 0; i < list.length; i++ )
+	{
+		const uint32_t key = list.pointer[ i ].key;
+		const int langId = list.pointer[ i ].id;
+		const int token = vocab.token_sot + 1 + langId;
+		if( token < 0 || token >= vocab.n_vocab )
+			continue;
+		const float prob = decoderProbs[ token ];
+		if( prob > bestProb )
+		{
+			bestProb = prob;
+			bestLanguage = key;
+		}
+	}
+
+	if( bestLanguage == UINT_MAX )
+		return E_FAIL;
+
+	language = bestLanguage;
+	return S_OK;
+}
+
 HRESULT ContextImpl::decode( const int* prompt_tokens, size_t prompt_length, int n_past, int threads )
 {
 	// whisper_decode
@@ -552,15 +591,21 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 	// overwrite audio_ctx
 	exp_n_audio_ctx = params.audio_ctx;
 
+	uint32_t detectedLanguage = params.language;
+	if( vocab.is_multilingual() && detectedLanguage == UINT_MAX )
+	{
+		CHECK( detectLanguage( mel, seek_start, params.cpuThreads, detectedLanguage ) );
+	}
+
 	// these tokens determine the task that will be performed
 	std::vector<whisper_token> prompt_init = { vocab.token_sot };
 	if( vocab.is_multilingual() )
 	{
-		int langId = lookupLanguageId( params.language );
+       int langId = lookupLanguageId( detectedLanguage );
 		if( langId < 0 )
 		{
 			char lang[ 5 ];
-			*(uint32_t*)( &lang[ 0 ] ) = params.language;
+           *(uint32_t*)( &lang[ 0 ] ) = detectedLanguage;
 			lang[ 4 ] = '\0';
 			logError( u8"%s: unknown language '%s'", __func__, lang );
 			return E_INVALIDARG;
