@@ -595,17 +595,19 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 	if( vocab.is_multilingual() && detectedLanguage == UINT_MAX )
 	{
 		CHECK( detectLanguage( mel, seek_start, params.cpuThreads, detectedLanguage ) );
+		logInfo( u8"Detected language key: 0x%08X", detectedLanguage );
 	}
+
 
 	// these tokens determine the task that will be performed
 	std::vector<whisper_token> prompt_init = { vocab.token_sot };
 	if( vocab.is_multilingual() )
 	{
-       int langId = lookupLanguageId( detectedLanguage );
+	   int langId = lookupLanguageId( detectedLanguage );
 		if( langId < 0 )
 		{
 			char lang[ 5 ];
-           *(uint32_t*)( &lang[ 0 ] ) = detectedLanguage;
+		   *(uint32_t*)( &lang[ 0 ] ) = detectedLanguage;
 			lang[ 4 ] = '\0';
 			logError( u8"%s: unknown language '%s'", __func__, lang );
 			return E_INVALIDARG;
@@ -729,7 +731,6 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 					auto p = profiler.cpuBlock( eCpuBlock::Sample );
 					const sTokenData token = ( i == 0 ) ? sampleTimestamp( true ) : sampleBest();
 
-					// logInfo(u8"get Token vlen: %f", token.vlen);
 					//logInfo(u8"get Token (id): %s n_past: %d ", vocab.string(token.id), n_past);
 
 					// timestamp token - update sliding window
@@ -762,31 +763,52 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 					//}
 
 					// end of segment
-					if( token.id == vocab.token_eot ||                  // end of text token
-						( params.max_tokens > 0 && i >= params.max_tokens ) || // max tokens per segment reached
-						( has_ts && seek + seek_delta + 100 >= seek_end )     // end of audio reached
-						)
-					{
-						logInfo(u8"end of segment!");
-						if( result_len == 0 )
+						if( token.id == vocab.token_eot ||                  // end of text token
+							( params.max_tokens > 0 && i >= params.max_tokens ) || // max tokens per segment reached
+							( has_ts && seek + seek_delta + 100 >= seek_end )     // end of audio reached
+							)
 						{
-							if( seek + seek_delta + 100 >= seek_end )
-								result_len = i + 1;
+							logInfo(u8"end of segment!");
+							if( result_len == 0 )
+							{
+								if( seek + seek_delta + 100 >= seek_end )
+									result_len = i + 1;
+								else
+								{
+									failed = true;
+									break;
+								}
+							}
 							else
 							{
-								failed = true;
-								break;
+								// Distilled models (e.g. distil-whisper with only 2 decoder layers) often
+								// omit the closing timestamp and go straight to EOT.
+								// result_len was set at the opening timestamp (i=0), leaving all content
+								// tokens (i=1..K) outside the resize window and thus silently dropped.
+								// Extend result_len to include every token up to and including this one.
+								result_len = i + 1;
+
+								// If we ended on EOT or max_tokens (i.e. no closing timestamp was ever
+								// produced), seek_delta is still at the opening-timestamp position
+								// (a small value such as 78 = 0.78 s).  That would cause the outer loop
+								// to do  seek += 78  and re-process almost the same audio window.
+								// Treat the whole 30-second chunk as consumed so the loop advances
+								// correctly.  The same value is used as tt1 in the residual-text push.
+								if( token.id == vocab.token_eot ||
+									( params.max_tokens > 0 && i >= params.max_tokens ) )
+								{
+									seek_delta = 100 * WHISPER_CHUNK_SIZE;
+								}
 							}
-						}
 
-						if( params.flag( eFullParamsFlags::SingleSegment ) )
-						{
-							result_len = i + 1;
-							seek_delta = 100 * WHISPER_CHUNK_SIZE;
-						}
+							if( params.flag( eFullParamsFlags::SingleSegment ) )
+							{
+								result_len = i + 1;
+								seek_delta = 100 * WHISPER_CHUNK_SIZE;
+							}
 
-						break;
-					}
+							break;
+						}
 				}
 
 				// sometimes, the decoding can get stuck in a repetition loop
@@ -882,6 +904,28 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 					t0 = t1;
 					i0 = i + 1;
 				}
+			}
+
+			// If there's remaining text after the last timestamp (or no closing timestamp at all),
+			// push it as a final segment covering from t0 to the computed end of this chunk.
+			if( !text.empty() )
+			{
+				const bool speedUp = params.flag( eFullParamsFlags::SpeedupAudio );
+				const int tt0 = speedUp ? 2 * t0 : t0;
+				const int tt1 = speedUp ? 2 * ( seek + seek_delta ) : ( seek + seek_delta );
+
+				if( params.flag( eFullParamsFlags::PrintRealtime ) )
+				{
+					if( params.flag( eFullParamsFlags::PrintTimestamps ) )
+						logDebug( u8"[%s --> %s]  %s", to_timestamp( tt0 ).c_str(), to_timestamp( tt1 ).c_str(), text.c_str() );
+					else
+						logDebug( u8"%s", text.c_str() );
+				}
+
+				chunk_result.push_back( { tt0, tt1, text, {} } );
+				for( int j = i0; j < (int)tokens_cur.size(); j++ )
+					chunk_result.back().tokens.push_back( tokens_cur[ j ] );
+				text = "";
 			}
 
 			// write result
