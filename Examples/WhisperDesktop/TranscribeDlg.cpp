@@ -505,12 +505,6 @@ HRESULT TranscribeDlg::transcribe()
 	sFullParams fullParams;
 	CHECK_EX( context->fullDefaultParams( eSamplingStrategy::Greedy, &fullParams ) );
 	
-	//fullParams.greedy.n_past = 0;
-	fullParams.n_max_text_ctx = 0;
-	// fullParams.audio_ctx = 1000; model default: 1500
-	// fullParams.max_len = 1;
-	// fullParams.max_tokens = 100;
-	// fullParams.thold_pt = 0.5;
 	fullParams.language = transcribeArgs.language;
 	fullParams.setFlag( eFullParamsFlags::Translate, transcribeArgs.translate );
 	//fullParams.setFlag( eFullParamsFlags::TokenTimestamps, true);
@@ -567,7 +561,7 @@ HRESULT TranscribeDlg::transcribe()
 	case eOutputFormat::TextTimestamps:
 		return writeTextFile( segments, len.countSegments, outputFile, true );
 	case eOutputFormat::SubRip:
-		return writeSubRip( segments, len.countSegments, appState.duplicatedResults.size(), outputFile, replaceTexts);
+		return writeSubRip( segments, len.countSegments, appState.duplicatedResults.size(), outputFile);
 	case eOutputFormat::WebVTT:
 		return writeWebVTT( segments, len.countSegments, outputFile );
 	default:
@@ -645,7 +639,7 @@ HRESULT TranscribeDlg::writeTextFile( const sSegment* const segments, const size
 	return S_OK;
 }
 
-HRESULT TranscribeDlg::writeSubRip( const sSegment* const segments, const size_t length, const size_t dupLines , CAtlFile& file, std::vector<ReplaceText> replaceTexts)
+HRESULT TranscribeDlg::writeSubRip( const sSegment* const segments, const size_t length, const size_t dupLines , CAtlFile& file)
 {
 	if (segments == nullptr) {
 		logWarning(u8"segments is null, writeSubRip fail!");
@@ -665,30 +659,6 @@ HRESULT TranscribeDlg::writeSubRip( const sSegment* const segments, const size_t
 	for( size_t i = 0; i < length - dupLines; i++ )
 	{
 		const sSegment& seg = segments[ i ];
-		char ch = '(';
-
-		if (std::strchr(seg.text, ch)) {
-			// continue;
-		}
-
-		// char* replaceResult = const_cast<char*>(seg.text);
-		// CString replaceResult(seg.text);
-
-		//int len = MultiByteToWideChar(CP_UTF8, 0, seg.text, -1, NULL, 0);
-		//wchar_t* wstr = new wchar_t[len];
-		//MultiByteToWideChar(CP_UTF8, 0, seg.text, -1, wstr, len);
-		//CString replaceResult(wstr);
-
-		//cstringa replaceresult(seg.text);
-		//for (replacetext i : replacetexts) {
-		//	for (cstringw wrt : i.wrongtext) {
-		//		//cstringa awrt(wrt);
-		//		//cstringa r(i.righttext);
-		//		//replaceresult.replace(awrt, r);
-		//		replaceresult.replace(wrt, i.righttext);
-		//	}
-		//}
-		//cstringa replaceresult2(replaceresult);
 
 		line.Format( "%zu\r\n", i + 1 );
 		printTime( line, seg.time.begin, true );

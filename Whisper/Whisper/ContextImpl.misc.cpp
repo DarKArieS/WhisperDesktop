@@ -76,14 +76,14 @@ HRESULT COMLIGHTCALL ContextImpl::fullDefaultParams( eSamplingStrategy strategy,
 	switch( strategy )
 	{
 	case eSamplingStrategy::Greedy:
-		rdi->greedy.best_of = 5;
-		rdi->beam_search.beam_size = -1;
-		rdi->beam_search.patience = -1.0f;
+		rdi->beam_search.n_past = -1;
+		rdi->beam_search.beam_width = -1;
+		rdi->beam_search.n_best = -1;
 		break;
 	case eSamplingStrategy::BeamSearch:
-		rdi->greedy.best_of = -1;
-		rdi->beam_search.beam_size = 5;
-		rdi->beam_search.patience = -1.0f;
+		rdi->greedy.n_past = -1;
+		rdi->beam_search.beam_width = 10;
+		rdi->beam_search.n_best = 5;
 		break;
 	default:
 		logError( u8"Unknown sampling strategy %i", (int)strategy );

@@ -123,20 +123,6 @@ private:
 	};
 	TranscribeArgs transcribeArgs;
 
-	class ReplaceText {
-	public:
-		CStringW rightText;
-		std::vector<CStringW> wrongText;
-		ReplaceText(CStringW rightText, std::vector<CStringW> wrongText) {
-			this->rightText = rightText;
-			this->wrongText = wrongText;
-		};
-	};
-
-	std::vector<ReplaceText> replaceTexts = {
-		ReplaceText(L"123", {L"あら"})
-	};
-
 	void __stdcall poolCallback() noexcept override final;
 
 	LRESULT onCallbackStatus( UINT, WPARAM wParam, LPARAM, BOOL& bHandled );
@@ -145,7 +131,7 @@ private:
 	void getThreadError();
 	
 	static HRESULT writeTextFile( const Whisper::sSegment* const segments, const size_t length, CAtlFile& file, bool timestamps );
-	static HRESULT writeSubRip( const Whisper::sSegment* const segments, const size_t length, const size_t dupLines, CAtlFile& file, std::vector<ReplaceText> replaceTexts);
+	static HRESULT writeSubRip( const Whisper::sSegment* const segments, const size_t length, const size_t dupLines, CAtlFile& file);
 	static HRESULT writeWebVTT( const Whisper::sSegment* const segments, const size_t length, CAtlFile& file );
 
 	static HRESULT __cdecl newSegmentCallbackStatic( Whisper::iContext* ctx, uint32_t n_new, void* user_data ) noexcept;

@@ -527,54 +527,7 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 	// see issue #39: https://github.com/ggerganov/whisper.cpp/issues/39
 	if( seek_end < 100 + seek_start )
 		return S_FALSE;
-
-	// a set of temperatures to use
-	// [ t0, t0 + delta, t0 + 2*delta, ..., < 1.0f + 1e-6f ]
-	std::vector<float> temperatures;
-	if (params.temperature_inc > 0.0f) {
-		for (float t = params.temperature; t < 1.0f + 1e-6f; t += params.temperature_inc) {
-			temperatures.push_back(t);
-		}
-	}
-	else {
-		temperatures.push_back(params.temperature);
-	}
-
-	// initialize the decoders
-	int n_decoders = 1;
-
-	switch (params.strategy) {
-	case Whisper::eSamplingStrategy::Greedy:
-	{
-		n_decoders = params.greedy.best_of;
-	} break;
-	case Whisper::eSamplingStrategy::BeamSearch:
-	{
-		n_decoders = std::max(params.greedy.best_of, params.beam_search.beam_size);
-	} break;
-	};
-
-	n_decoders = std::max(1, n_decoders);
-
-	if (n_decoders > WHISPER_MAX_DECODERS) {
-		// WHISPER_LOG_ERROR("%s: too many decoders requested (%d), max = %d\n", __func__, n_decoders, WHISPER_MAX_DECODERS);
-		return S_FALSE;
-	}
-
-	// TAGS: WHISPER_DECODER_INIT
-	//for (int j = 1; j < n_decoders; j++) {
-	//	auto& decoder = state->decoders[j];
-
-	//	decoder.sequence.tokens.reserve(state->decoders[0].sequence.tokens.capacity());
-
-	//	decoder.probs.resize(ctx->vocab.n_vocab);
-	//	decoder.logits.resize(ctx->vocab.n_vocab);
-	//	decoder.logprobs.resize(ctx->vocab.n_vocab);
-	//	decoder.logits_id.reserve(ctx->model.hparams.n_vocab);
-
-	//	decoder.rng = std::mt19937(0);
-	//}
-
+	
 	// the accumulated text context so far
 	if( params.flag( eFullParamsFlags::NoContext ) )
 		prompt_past.clear();
@@ -639,8 +592,6 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 
 	while( true )
 	{
-		context.clearState();
-
 		if( nullptr != progress.pfn )
 		{
 			const int pos = seek - seek_start;
@@ -677,16 +628,16 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		prompt.clear();
 
 		// if we have already generated some text, use it as a prompt to condition the next generation
-		//if( !prompt_past.empty() )
-		//{
-		//	int n_take = std::min( std::min( params.n_max_text_ctx, model.parameters.n_text_ctx / 2 ), int( prompt_past.size() ) );
+		if( !prompt_past.empty() )
+		{
+			int n_take = std::min( std::min( params.n_max_text_ctx, model.parameters.n_text_ctx / 2 ), int( prompt_past.size() ) );
 
-		//	prompt = { vocab.token_prev };
-		//	prompt.insert( prompt.begin() + 1, prompt_past.end() - n_take, prompt_past.end() );
+			prompt = { vocab.token_prev };
+			prompt.insert( prompt.begin() + 1, prompt_past.end() - n_take, prompt_past.end() );
 
-		//	prompt_past.clear();
-		//	prompt_past.insert( prompt_past.end(), prompt.begin() + 1, prompt.end() );
-		//}
+			prompt_past.clear();
+			prompt_past.insert( prompt_past.end(), prompt.begin() + 1, prompt.end() );
+		}
 
 		prompt.insert( prompt.end(), prompt_init.begin(), prompt_init.end() );
 
@@ -816,11 +767,6 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		// store the text from this iteration
 		if( !tokens_cur.empty() )
 		{
-			/*int n_ctx = (exp_n_audio_ctx > 0) ? exp_n_audio_ctx : model.parameters.n_audio_ctx;
-			if (seek_delta < n_ctx) {
-				seek = seek + 2 * n_ctx - seek_delta;
-			}*/
-
 			int i0 = 0; 
 			int t0 = seek + 2 * ( tokens_cur.front().tid - vocab.token_beg );
 
