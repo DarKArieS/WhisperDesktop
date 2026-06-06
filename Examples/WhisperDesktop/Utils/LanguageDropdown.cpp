@@ -31,23 +31,19 @@ namespace
 
 int LanguageDropdown::getInitialSelection( AppState& state ) const
 {
-	constexpr uint32_t english = 0x6E65;
-
 	// Load preference from the registry
 	uint32_t id = state.languageRead();
 	if( id == UINT_MAX )
-		id = english;
+       return 0;
 
 	auto it = std::find( keys.begin(), keys.end(), id );
 	if( it == keys.end() )
 	{
-		id = english;
-		it = std::find( keys.begin(), keys.end(), id );
-		assert( it != keys.end() );
+       return 0;
 	}
 
 	ptrdiff_t idx = it - keys.begin();
-	return (int)idx;
+    return 1 + (int)idx;
 }
 
 void LanguageDropdown::initialize( HWND owner, int idc, AppState& state )
@@ -57,6 +53,8 @@ void LanguageDropdown::initialize( HWND owner, int idc, AppState& state )
 
 	Whisper::sLanguageList list;
 	Whisper::getSupportedLanguages( list );
+
+  SendMessage( m_hWnd, CB_ADDSTRING, 0, (LPARAM)L"Auto detect" );
 
 	const size_t length = list.length;
 	keys.resize( length );
@@ -76,9 +74,11 @@ void LanguageDropdown::initialize( HWND owner, int idc, AppState& state )
 uint32_t LanguageDropdown::selectedLanguage()
 {
 	const int cs = (int)SendMessage( m_hWnd, CB_GETCURSEL, 0, 0 );
-	if( cs < 0 || cs >= keys.size() )
+   if( cs == 0 )
 		return UINT_MAX;
-	return keys[ cs ];
+	if( cs < 0 || cs > keys.size() )
+		return UINT_MAX;
+  return keys[ cs - 1 ];
 }
 
 void LanguageDropdown::saveSelection( AppState& state )

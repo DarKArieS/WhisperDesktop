@@ -53,6 +53,7 @@ namespace Whisper
 
 		HRESULT encode( iSpectrogram& mel, int seek );
 		HRESULT decode( const int* tokens, size_t length, int n_past, int threads );
+     HRESULT detectLanguage( iSpectrogram& mel, int seek, int threads, uint32_t& language );
 		sTokenData sampleBest( const float* probs, bool force_timestamp, bool is_initial );
 		sTokenData sampleBest();
 		sTokenData sampleTimestamp( bool initial );

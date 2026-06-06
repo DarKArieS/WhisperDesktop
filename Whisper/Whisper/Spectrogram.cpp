@@ -31,14 +31,14 @@ public:
 
 void Spectrogram::MelContext::run( int ith )
 {
-	std::array<float, N_MEL> arr;
+   std::vector<float> arr( result.mel );
 	for( uint32_t i = ith; i < result.length; i += n_threads )
 	{
 		const int offset = i * FFT_STEP;
 		const float* rsi = samples + offset;
-		context.fft( arr, rsi, countSamples - offset );
+     context.fft( arr.data(), rsi, countSamples - offset );
 
-		for( size_t j = 0; j < N_MEL; j++ )
+     for( size_t j = 0; j < result.mel; j++ )
 			result.data[ j * result.length + i ] = arr[ j ];
 	}
 }
@@ -70,8 +70,9 @@ HRESULT Spectrogram::pcmToMel( const iAudioBuffer* buffer, const Filters& filter
 		return OLE_E_BLANK;
 	const float* const samples = buffer->getPcmMono();
 
+   mel = filters.n_mel;
 	length = ( countSamples ) / FFT_STEP;
-	data.resize( N_MEL * length );
+  data.resize( (size_t)mel * length );
 
 	if( threads < 2 )
 	{

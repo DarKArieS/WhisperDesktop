@@ -213,11 +213,11 @@ struct whisper_vocab {
     id token_beg  = 50363;
 
     // available tasks
-    static const id token_translate  = 50358;
-    static const id token_transcribe = 50359;
+    id token_translate  = 50358;
+    id token_transcribe = 50359;
 
     bool is_multilingual() const {
-        return n_vocab == 51865;
+        return n_vocab >= 51865;
     }
 };
 
@@ -2547,11 +2547,11 @@ whisper_token whisper_token_lang(struct whisper_context * ctx, int lang_id) {
 }
 
 whisper_token whisper_token_translate(void) {
-    return whisper_vocab::token_translate;
+    return 50358;
 }
 
 whisper_token whisper_token_transcribe(void) {
-    return whisper_vocab::token_transcribe;
+    return 50359;
 }
 
 void whisper_print_timings(struct whisper_context * ctx) {
@@ -2841,9 +2841,9 @@ int whisper_full(
         const int lang_id = whisper_lang_id(params.language);
         prompt_init.push_back(whisper_token_lang(ctx, lang_id));
         if (params.translate) {
-            prompt_init.push_back(whisper_token_translate());
+            prompt_init.push_back(ctx->vocab.token_translate);
         } else {
-            prompt_init.push_back(whisper_token_transcribe());
+            prompt_init.push_back(ctx->vocab.token_transcribe);
         }
     }
 

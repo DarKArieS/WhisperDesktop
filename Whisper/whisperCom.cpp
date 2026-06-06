@@ -83,8 +83,8 @@ namespace Whisper
 			rdi.SentenceStart = whisper_token_solm( &ctx );
 			rdi.Not = whisper_token_not( &ctx );
 			rdi.TranscriptionBegin = whisper_token_beg( &ctx );
-			rdi.TaskTranslate = whisper_token_translate();
-			rdi.TaskTranscribe = whisper_token_transcribe();
+          rdi.TaskTranslate = ctx.vocab.token_translate;
+			rdi.TaskTranscribe = ctx.vocab.token_transcribe;
 			return S_OK;
 		}
 		HRESULT COMLIGHTCALL tokenize( const char* text, pfnDecodedTokens pfn, void* pv ) override final
@@ -352,6 +352,16 @@ namespace Whisper
 			{
 				vocab.token_eot++;
 				vocab.token_sot++;
+				vocab.token_prev++;
+				vocab.token_solm++;
+				vocab.token_not++;
+				vocab.token_beg++;
+			}
+
+			if( vocab.n_vocab >= 51866 )
+			{
+				vocab.token_translate++;
+				vocab.token_transcribe++;
 				vocab.token_prev++;
 				vocab.token_solm++;
 				vocab.token_not++;
