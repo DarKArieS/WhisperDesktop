@@ -3,7 +3,7 @@
 #include "Utils/miscUtils.h"
 #include <commctrl.h>
 #pragma comment(lib, "Comctl32.lib")
-#include "CircleIndicator.h"
+#include "CaptureDlg/CircleIndicator.h"
 
 namespace
 {

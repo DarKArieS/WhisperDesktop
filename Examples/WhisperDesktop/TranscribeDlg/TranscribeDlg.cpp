@@ -2,7 +2,6 @@
 #include "TranscribeDlg.h"
 #include "Utils/logger.h"
 #include <regex>
-#include <iostream>
 #include <filesystem>
 #include <shellapi.h>
 

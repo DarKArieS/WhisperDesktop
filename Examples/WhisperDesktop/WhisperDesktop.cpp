@@ -1,9 +1,9 @@
 #include "stdafx.h"
 #include "AppState.h"
 #include "Utils/miscUtils.h"
-#include "LoadModelDlg.h"
-#include "TranscribeDlg.h"
-#include "CaptureDlg.h"
+#include "LoadModelDlg/LoadModelDlg.h"
+#include "TranscribeDlg/TranscribeDlg.h"
+#include "CaptureDlg/CaptureDlg.h"
 
 static HRESULT dialogLoadModel( AppState& appState )
 {
