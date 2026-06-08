@@ -6,6 +6,7 @@
 #include "TranscribeResult.h"
 #include "sTokenData.h"
 #include "../ML/Device.h"
+#include <random>
 
 namespace Whisper
 {
@@ -54,9 +55,28 @@ namespace Whisper
 		HRESULT encode( iSpectrogram& mel, int seek );
 		HRESULT decode( const int* tokens, size_t length, int n_past, int threads );
 		HRESULT detectLanguage( iSpectrogram& mel, int seek, int threads, uint32_t& language );
-		sTokenData sampleBest( const float* probs, bool force_timestamp, bool is_initial );
-		sTokenData sampleBest();
-		sTokenData sampleTimestamp( bool initial );
+		sTokenData sampleBest( const float* probs, bool force_timestamp, bool is_initial, float temperature );
+		sTokenData sampleBest( float temperature );
+		sTokenData sampleTimestamp( bool initial, float temperature );
+
+		// Random source for temperature sampling (temperature > 0). Seeded deterministically
+		// so transcripts are reproducible across runs.
+		std::mt19937 rng{ 0 };
+
+		// Result of decoding a single segment at one temperature, plus the quality metrics
+		// used to decide whether to fall back to a higher temperature.
+		struct SegmentDecode
+		{
+			std::vector<sTokenData> tokens; // decoded tokens, already resized to result_len
+			int seek_delta = 0;
+			bool failed = false;            // decoder never found a usable end-of-segment
+			double avg_logprob = 0.0;       // mean log-probability of the kept tokens
+			double entropy = 0.0;           // token-id entropy over the last 32 tokens
+			float no_speech_prob = 0.0f;    // probability of the no-speech token at the first step
+		};
+		HRESULT decodeSegment( const sFullParams& params, int seek, int seek_end,
+			const std::vector<whisper_token>& prompt_init, float temperature, SegmentDecode& out );
+		static double computeEntropy( const std::vector<sTokenData>& tokens );
 
 		// Non-speech / blank token suppression, mirrors whisper.cpp whisper_process_logits
 		std::vector<int> suppress_tokens; // non-speech token ids, built once from the vocabulary

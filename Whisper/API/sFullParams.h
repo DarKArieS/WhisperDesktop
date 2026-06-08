@@ -90,6 +90,18 @@ namespace Whisper
 		pfnEncoderBegin encoder_begin_callback;
 		void* encoder_begin_callback_user_data;
 
+		// Temperature fallback (mirrors whisper.cpp). When temperature_inc > 0 and a segment
+		// decode fails its quality gates, the segment is re-decoded at temperatures
+		// temperature, temperature + temperature_inc, ... until it passes or t exceeds 1.0.
+		// NOTE: these fields must stay in sync (order + type) with the trailing fields of
+		// WhisperNet/Internal/sFullParams.cs, they share the same marshaled struct layout.
+		float temperature;       // initial sampling temperature (0 = greedy / argmax)
+		float temperature_inc;   // temperature increment per fallback step (0 disables fallback)
+		float entropy_thold;     // min token entropy over the last 32 tokens; below this a long segment is rejected (~2.4)
+		float logprob_thold;     // min average token log-probability; below this the segment is rejected (~-1.0)
+		float no_speech_thold;   // no-speech probability above which a low-logprob segment is treated as silence (~0.6)
+		int   best_of;           // reserved: number of candidates per temperature (currently a single candidate)
+
 		// Couple utility methods, they workaround the lack of bit fields in C++
 		inline bool flag( eFullParamsFlags f ) const
 		{

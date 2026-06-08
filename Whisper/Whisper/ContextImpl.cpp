@@ -1,8 +1,9 @@
 #include "stdafx.h"
 #include "ContextImpl.h"
 #include "Languages.h"
-#include "../Utils/Trace/tracing.h"
 #include <random>
+#include <map>
+#include <cmath>
 using namespace Whisper;
 
 ContextImpl::ContextImpl( const DirectCompute::Device& dev, const WhisperModel& modelData, iModel* modelPointer ) :
@@ -34,17 +35,6 @@ HRESULT ContextImpl::encode( iSpectrogram& mel, int seek )
 	ep.n_text_state = model.parameters.n_text_state;
 	ep.n_text_layer = model.parameters.n_text_layer;
 	ep.n_text_ctx = model.parameters.n_text_ctx;
-	/*logInfo(u8"---- encode parameter for the model: -----");
-	logInfo(u8"n_ctx: %d", ep.n_ctx);
-	logInfo(u8"n_mels: %d", ep.n_mels);
-	logInfo(u8"layersCount: %d", ep.layersCount);
-	logInfo(u8"n_state: %d", ep.n_state);
-	logInfo(u8"n_head: %d", ep.n_head);
-	logInfo(u8"n_audio_ctx: %d", ep.n_audio_ctx);
-	logInfo(u8"n_text_state: %d", ep.n_text_state);
-	logInfo(u8"n_text_layer: %d", ep.n_text_layer);
-	logInfo(u8"n_text_ctx: %d", ep.n_text_ctx);
-	logInfo(u8"------------------------------------------");*/
 	
 	try
 	{
@@ -172,7 +162,9 @@ void ContextImpl::buildSuppressTokens()
 }
 
 // the most basic sampling scheme - select the top token
-sTokenData ContextImpl::sampleBest( const float* probs, bool force_timestamp, bool is_initial )
+// When temperature > 0, the final token is drawn at random from the (suppressed, timestamp-rule
+// applied) distribution scaled by the temperature, instead of taking the argmax.
+sTokenData ContextImpl::sampleBest( const float* probs, bool force_timestamp, bool is_initial, float temperature )
 {
 	// whisper_sample_best
 	const Vocabulary& vocab = model.shared->vocab;
@@ -242,6 +234,49 @@ sTokenData ContextImpl::sampleBest( const float* probs, bool force_timestamp, bo
 		result.ptsum = (float)sum_ts;
 	}
 
+	// Temperature sampling: draw from the (already suppressed / timestamp-constrained)
+	// distribution rather than taking the argmax. probs_id[i] still maps 1:1 to token id i
+	// here (no sorting yet), so we can build the weight directly from the index.
+	// For post-softmax probabilities p, softmax(log(p)/T) is proportional to p^(1/T).
+	if( temperature > 0.0f )
+	{
+		const double invT = 1.0 / (double)temperature;
+		double sum = 0.0;
+		for( size_t i = 0; i < n_logits; i++ )
+		{
+			// probs_id[i].first holds the token probability, or -INFINITY if suppressed.
+			const double p = probs_id[ i ].first;
+			double w = ( p > 0.0 ) ? std::pow( p, invT ) : 0.0;
+			// never sample the structural tokens (sot / solm / not)
+			const int id = (int)i;
+			if( id == vocab.token_sot || id == vocab.token_solm || id == vocab.token_not )
+				w = 0.0;
+			probs_id[ i ].first = w; // reuse the slot as the sampling weight
+			sum += w;
+		}
+
+		int chosen = vocab.token_eot;
+		if( sum > 0.0 )
+		{
+			std::uniform_real_distribution<double> dist( 0.0, sum );
+			const double r = dist( rng );
+			double acc = 0.0;
+			for( size_t i = 0; i < n_logits; i++ )
+			{
+				acc += probs_id[ i ].first;
+				if( acc >= r )
+				{
+					chosen = (int)i;
+					break;
+				}
+			}
+		}
+
+		result.id = chosen;
+		result.p = probs[ chosen ]; // original probability of the chosen token
+		return result;
+	}
+
 	// find the top K tokens
 	const int top_k = 4;
 
@@ -274,16 +309,41 @@ sTokenData ContextImpl::sampleBest( const float* probs, bool force_timestamp, bo
 	return result;
 }
 
-sTokenData ContextImpl::sampleBest()
+sTokenData ContextImpl::sampleBest( float temperature )
 {
 	const int n_vocab = model.shared->vocab.n_vocab;
-	return sampleBest( probs.data() + ( probs.size() - n_vocab ), false, false );
+	return sampleBest( probs.data() + ( probs.size() - n_vocab ), false, false, temperature );
 }
 
-sTokenData ContextImpl::sampleTimestamp( bool initial )
+sTokenData ContextImpl::sampleTimestamp( bool initial, float temperature )
 {
 	const int n_vocab = model.shared->vocab.n_vocab;
-	return sampleBest( probs.data() + ( probs.size() - n_vocab ), true, initial );
+	return sampleBest( probs.data() + ( probs.size() - n_vocab ), true, initial, temperature );
+}
+
+// Token-id entropy over the last 32 kept tokens. A repetition loop collapses the distribution
+// of token ids, driving this toward 0 - that is how a stuck decode is detected (whisper.cpp
+// whisper_sequence_score). Higher is healthier.
+double ContextImpl::computeEntropy( const std::vector<sTokenData>& tokens )
+{
+	const int n = 32;
+	const int total = (int)tokens.size();
+	const int start = std::max( 0, total - n );
+	const int cnt = total - start;
+	if( cnt <= 0 )
+		return 0.0;
+
+	std::map<whisper_token, int> counts;
+	for( int i = start; i < total; i++ )
+		counts[ tokens[ i ].id ]++;
+
+	double entropy = 0.0;
+	for( const auto& kv : counts )
+	{
+		const double p = (double)kv.second / (double)cnt;
+		entropy -= p * std::log( p );
+	}
+	return entropy;
 }
 
 // a cost-function / heuristic that is high for text that takes longer to pronounce
@@ -567,6 +627,122 @@ public:
 	}
 };
 
+// Decode a single segment at one fixed temperature, starting from prompt_init.
+// The audio features are assumed to be already encoded for this seek position; the GPU KV
+// cache is rewritten from position 0 on every call, so this can be invoked repeatedly to
+// retry the same segment at different temperatures. Fills `out` with the kept tokens and the
+// quality metrics used by the temperature-fallback decision in runFullImpl.
+HRESULT ContextImpl::decodeSegment( const sFullParams& params, int seek, int seek_end,
+	const std::vector<whisper_token>& prompt_init, float temperature, SegmentDecode& out )
+{
+	const Whisper::Vocabulary& vocab = model.shared->vocab;
+
+	std::vector<sTokenData> tokens_cur;
+	tokens_cur.reserve( model.parameters.n_text_ctx );
+
+	std::vector<whisper_token> prompt = prompt_init;
+
+	int n_past = 0;
+	int seek_delta = 100 * WHISPER_CHUNK_SIZE;
+	int result_len = 0;
+	bool failed = false;
+	bool has_ts = false; // have we already sampled a non-beg timestamp token for the current segment?
+	float no_speech_prob = 0.0f;
+
+	// Measure "Decode" profiler value, both CPU and GPU times
+	auto prof = context.decodeProfiler();
+	for( int i = 0, n_max = model.parameters.n_text_ctx / 2 - 4; i < n_max; i++ )
+	{
+		CHECK( decode( prompt.data(), prompt.size(), n_past, params.cpuThreads ) );
+
+		n_past += (int)prompt.size();
+		prompt.clear();
+
+		// no-speech probability is read from the first decode step, before any sampling.
+		// token_solm (50361) is the <|nospeech|> token in this vocabulary.
+		if( i == 0 )
+		{
+			const int n_vocab = vocab.n_vocab;
+			const float* p = probs.data() + ( probs.size() - n_vocab );
+			if( vocab.token_solm >= 0 && vocab.token_solm < n_vocab )
+				no_speech_prob = p[ vocab.token_solm ];
+		}
+
+		{
+			auto pf = profiler.cpuBlock( eCpuBlock::Sample );
+			const sTokenData token = ( i == 0 ) ? sampleTimestamp( true, temperature ) : sampleBest( temperature );
+
+			// timestamp token - update sliding window
+			if( token.id > vocab.token_beg )
+			{
+				const int seek_delta_new = 2 * ( token.id - vocab.token_beg );
+
+				// do not allow to go back in time
+				if( has_ts && seek_delta > seek_delta_new && result_len < i )
+					break;
+
+				seek_delta = seek_delta_new;
+				result_len = i + 1;
+				has_ts = true;
+			}
+
+			// add it to the context
+			prompt.push_back( token.id );
+			tokens_cur.push_back( token );
+
+			// end of segment
+			if( token.id == vocab.token_eot ||                  // end of text token
+				( params.max_tokens > 0 && i >= params.max_tokens ) || // max tokens per segment reached
+				( has_ts && seek + seek_delta + 100 >= seek_end )     // end of audio reached
+				)
+			{
+				if( result_len == 0 )
+				{
+					if( seek + seek_delta + 100 >= seek_end )
+						result_len = i + 1;
+					else
+					{
+						failed = true;
+						break;
+					}
+				}
+
+				if( params.flag( eFullParamsFlags::SingleSegment ) )
+				{
+					result_len = i + 1;
+					seek_delta = 100 * WHISPER_CHUNK_SIZE;
+				}
+
+				break;
+			}
+		}
+
+		// the decoding can get stuck in a repetition loop; flag it as failed so the caller can
+		// retry at a higher temperature instead of advancing the window blindly
+		if( i == n_max - 1 && ( result_len == 0 || seek_delta < 100 * WHISPER_CHUNK_SIZE / 2 ) )
+		{
+			failed = true;
+			break;
+		}
+	}
+
+	// shrink down to result_len
+	tokens_cur.resize( result_len );
+
+	// quality metrics used by the temperature-fallback decision
+	double sum_logprob = 0.0;
+	for( const auto& t : tokens_cur )
+		sum_logprob += std::log( std::max( (double)t.p, 1e-10 ) );
+
+	out.tokens = std::move( tokens_cur );
+	out.seek_delta = seek_delta;
+	out.failed = failed;
+	out.avg_logprob = ( result_len > 0 ) ? ( sum_logprob / result_len ) : -INFINITY;
+	out.entropy = computeEntropy( out.tokens );
+	out.no_speech_prob = no_speech_prob;
+	return S_OK;
+}
+
 HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const sProgressSink& progress, iSpectrogram& mel )
 {
 	auto ts = device.setForCurrentThread();
@@ -643,11 +819,6 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 	// int progress_prev = 0;
 	// int progress_step = 5;
 
-	std::vector<sTokenData> tokens_cur;
-	tokens_cur.reserve( model.parameters.n_text_ctx );
-	std::vector<whisper_token> prompt;
-	prompt.reserve( model.parameters.n_text_ctx );
-
 	// main loop
 	int seek = seek_start;
 	// Start measuring "Run" profiler value, both CPU and GPU times
@@ -693,165 +864,75 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		// encode audio features starting at offset seek
 		CHECK( encode( mel, seek ) );
 
-		int n_past = 0;
-		prompt.clear();
-
-		// if we have already generated some text, use it as a prompt to condition the next generation
+		// Build the decode prompt once for this position: the rolling text context (trimmed to
+		// what fits) followed by the task prompt. This prompt is shared across all temperature
+		// retries, so re-decoding never re-reads the audio or rebuilds the context.
+		std::vector<whisper_token> prompt0;
 		if( !prompt_past.empty() )
 		{
 			int n_take = std::min( std::min( params.n_max_text_ctx, model.parameters.n_text_ctx / 2 ), int( prompt_past.size() ) );
 
-			prompt = { vocab.token_prev };
-			prompt.insert( prompt.begin() + 1, prompt_past.end() - n_take, prompt_past.end() );
+			prompt0.push_back( vocab.token_prev );
+			prompt0.insert( prompt0.end(), prompt_past.end() - n_take, prompt_past.end() );
 
-			prompt_past.clear();
-			prompt_past.insert( prompt_past.end(), prompt.begin() + 1, prompt.end() );
+			// keep prompt_past in sync with what we actually feed (trim to the last n_take tokens)
+			prompt_past.assign( prompt0.begin() + 1, prompt0.end() );
 		}
+		prompt0.insert( prompt0.end(), prompt_init.begin(), prompt_init.end() );
 
-		prompt.insert( prompt.end(), prompt_init.begin(), prompt_init.end() );
-
-		// logInfo(u8"prompt size: %zu", prompt.size());
-
-		int seek_delta = 100 * WHISPER_CHUNK_SIZE;
-
-		// print the prompt
-		// for (int i = 0; i < prompt.size(); i++) {
-		// 	logInfo(u8"prompt[%d] = %s\n", i, vocab.string(prompt[i]));
-		// }
-
-		// the accumulated transcription in the current iteration
-		int result_len = 0;
-		tokens_cur.clear();
-
-		bool failed = false;
-		bool has_ts = false; // have we already sampled a non-beg timestamp token for the current segment?
+		// Temperature fallback: decode the segment at the lowest temperature first; if it fails
+		// the quality gates, re-decode at successively higher temperatures until one passes or
+		// the list is exhausted (whisper.cpp whisper_full_with_state behavior). 
+		std::vector<float> temperatures;
+		if( params.temperature_inc > 0.0f )
+		{
+			for( float t = params.temperature; t < 1.0f + 1e-6f; t += params.temperature_inc )
+				temperatures.push_back( t );
+		}
+		else
+			temperatures.push_back( params.temperature );
+		// guard against a misconfigured temperature >= 1.0 producing an empty list
+		if( temperatures.empty() )
+			temperatures.push_back( params.temperature );
 
 		logInfo(u8" >>> Start Decode <<<");
+		SegmentDecode best;
+		for( size_t it = 0; it < temperatures.size(); it++ )
 		{
-			// Measure "Decode" profiler value, both CPU and GPU times
-			auto prof = context.decodeProfiler();
-			for( int i = 0, n_max = model.parameters.n_text_ctx / 2 - 4; i < n_max; i++ )
-			{
-				// logInfo(u8"decode loop: %d / %d, with n_past: %d", i, n_max, n_past);
-				CHECK( decode( prompt.data(), prompt.size(), n_past, params.cpuThreads ) );
+			SegmentDecode cand;
+			CHECK( decodeSegment( params, seek, seek_end, prompt0, temperatures[ it ], cand ) );
+			best = std::move( cand );
 
-				n_past += (int)prompt.size();
-				prompt.clear();
+			// fall back only if this is not already the last (highest) temperature
+			if( it + 1 >= temperatures.size() )
+				break;
 
-				// very basic greedy sampling strategy:
-				//
-				//   - always take the most probable token
-				//
-				// more sophisticated sampling strategies could be implemented here, but we keep it simple
-				// feel free to experiment!
-				//
-				{
-					auto p = profiler.cpuBlock( eCpuBlock::Sample );
-					const sTokenData token = ( i == 0 ) ? sampleTimestamp( true ) : sampleBest();
+			const bool entropyFail = ( best.tokens.size() > 32 && best.entropy < params.entropy_thold );
+			const bool logprobFail = ( best.avg_logprob < params.logprob_thold && best.no_speech_prob < params.no_speech_thold );
+			if( !( best.failed || entropyFail || logprobFail ) )
+				break;
 
-					// logInfo(u8"get Token vlen: %f", token.vlen);
-					//logInfo(u8"get Token (id): %s n_past: %d ", vocab.string(token.id), n_past);
-
-					// timestamp token - update sliding window
-					if( token.id > vocab.token_beg )
-					{
-						const int seek_delta_new = 2 * ( token.id - vocab.token_beg );
-						//logInfo(u8"=====");
-						//logInfo(u8"this token is time stamp, delta: %d", seek_delta_new);
-						
-						// do not allow to go back in time
-						if (has_ts && seek_delta > seek_delta_new && result_len < i) {
-							logInfo(u8"do not allow to go back in time");
-							break;
-						}
-
-						//logInfo(u8"=====");
-
-						seek_delta = seek_delta_new;
-						result_len = i + 1;
-						has_ts = true;
-					}
-
-					// add it to the context
-					prompt.push_back( token.id );
-					tokens_cur.push_back( token );
-
-					//{
-					//    const auto tt = token.pt > 0.10 ? ctx->vocab.id_to_token[token.tid] : "[?]";
-					//    printf("%s: %10s %6d %6.3f '%s'\n", __func__, tt.c_str(), token.id, token.pt, ctx->vocab.id_to_token[token.id].c_str());
-					//}
-
-					// end of segment
-					if( token.id == vocab.token_eot ||                  // end of text token
-						( params.max_tokens > 0 && i >= params.max_tokens ) || // max tokens per segment reached
-						( has_ts && seek + seek_delta + 100 >= seek_end )     // end of audio reached
-						)
-					{
-						logInfo(u8"end of segment!");
-						if( result_len == 0 )
-						{
-							if( seek + seek_delta + 100 >= seek_end )
-								result_len = i + 1;
-							else
-							{
-								failed = true;
-								break;
-							}
-						}
-
-						if( params.flag( eFullParamsFlags::SingleSegment ) )
-						{
-							result_len = i + 1;
-							seek_delta = 100 * WHISPER_CHUNK_SIZE;
-						}
-
-						break;
-					}
-				}
-
-				// sometimes, the decoding can get stuck in a repetition loop
-				// this is a simple strategy to avoid such cases - we simply flag the decoding as failed and advance
-				// the sliding window by 1 second
-				if( i == n_max - 1 && ( result_len == 0 || seek_delta < 100 * WHISPER_CHUNK_SIZE / 2 ) )
-				{
-					failed = true;
-					logInfo(u8"do not find end of segment!");
-					break;
-				}
-			}
-		}
-		if( failed )
-		{
-			//logError( u8"%s: failed to generate timestamp token - skipping one second", __func__ );
-			//seek += 100;
-			//continue;
+			logDebug( u8"temperature %.2f rejected (failed=%d entropy=%.3f avg_logprob=%.3f no_speech=%.3f) -> fallback",
+				temperatures[ it ], (int)best.failed, best.entropy, best.avg_logprob, best.no_speech_prob );
 		}
 
-		// shrink down to result_len
-		tokens_cur.resize( result_len );
+		std::vector<sTokenData>& tokens_cur = best.tokens;
+		const int seek_delta = best.seek_delta;
 
+		// add the accepted tokens to the rolling context
 		for( const auto& r : tokens_cur )
 			prompt_past.push_back( r.id );
 
-		// store the text from this iteration
+		// store the text from this iteration, one segment per timestamp boundary
 		if( !tokens_cur.empty() )
 		{
-			int i0 = 0; 
+			int i0 = 0;
 			int t0 = seek + 2 * ( tokens_cur.front().tid - vocab.token_beg );
 
 			std::string text = "";
 
-			// repeat detect
-			std::string repeat_text = "";
-			int repeatTimes = 0;
-			int repeatIndex = -1;
-			std::vector<Segment> chunk_result;
-
 			for( int i = 0; i < (int)tokens_cur.size(); i++ )
 			{
-				//printf("%s: %18s %6.3f %18s %6.3f\n", __func__,
-				//        ctx->vocab.id_to_token[tokens_cur[i].id].c_str(), tokens_cur[i].p,
-				//        ctx->vocab.id_to_token[tokens_cur[i].tid].c_str(), tokens_cur[i].pt);
 				if( params.flag( eFullParamsFlags::PrintSpecial ) || tokens_cur[ i ].id < vocab.token_eot )
 					text += vocab.string( tokens_cur[ i ].id );
 
@@ -872,23 +953,18 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 								logDebug( u8"%s", text.c_str() );
 						}
 
-						// repeat process
-						if (repeat_text.compare(text) == 0) {
-							if (repeatTimes == 0) {
-								repeatIndex = chunk_result.size() - 1;
-							}
-							
-							repeatTimes += 1;
-						}
-						else {
-							repeatIndex = -1;
-							repeat_text = text;
-							repeatTimes = 0;
-						}
-
-						chunk_result.push_back( { tt0, tt1, text, {} } );
+						result_all.push_back( { tt0, tt1, text, {} } );
 						for( int j = i0; j <= i; j++ )
-							chunk_result.back().tokens.push_back( tokens_cur[ j ] );
+							result_all.back().tokens.push_back( tokens_cur[ j ] );
+
+						int n_new = 1;
+						if( nullptr != params.new_segment_callback )
+						{
+							auto cb = profiler.cpuBlock( eCpuBlock::Callbacks );
+							HRESULT hr = params.new_segment_callback( this, n_new, params.new_segment_callback_user_data );
+							if( FAILED( hr ) )
+								return hr;
+						}
 					}
 					text = "";
 					while( i < (int)tokens_cur.size() && tokens_cur[ i ].id > vocab.token_beg )
@@ -898,72 +974,10 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 					i0 = i + 1;
 				}
 			}
-
-			// write result
-			if (repeatTimes > 5) {
-				logDebug(u8"repeat times: %d -> retry", repeatTimes);
-				int t0 = seek;
-				if (repeatIndex > 0) {
-					logDebug(u8"retry after time %d", chunk_result[repeatIndex].t1);
-
-					for (int i = 0; i <= repeatIndex; i++) {
-						result_all.push_back(chunk_result[i]);
-						int n_new = 1;
-
-						/*if( params.flag( eFullParamsFlags::TokenTimestamps ) )
-						{
-							expComputeTokenLevelTimestamps( (int)result_all.size() - 1, params.thold_pt, params.thold_ptsum );
-							if( params.max_len > 0 )
-								n_new = wrapSegment( params.max_len );
-						}*/
-						if (nullptr != params.new_segment_callback)
-						{
-							auto cb = profiler.cpuBlock(eCpuBlock::Callbacks);
-							HRESULT hr = params.new_segment_callback(this, n_new, params.new_segment_callback_user_data);
-							if (FAILED(hr))
-								return hr;
-						}
-					}
-
-					t0 = chunk_result[repeatIndex].t1;
-				}
-				int t1 = t0 + 500;
-
-				result_all.push_back({ t0, t1, "repeat too many times! jump...", {} });
-				seek = t1;
-				continue;
-			}
-			else {
-				logDebug(u8"repeat times: %d", repeatTimes);
-
-				for (int i = 0; i < (int)chunk_result.size(); i++) {
-					result_all.push_back(chunk_result[i]);
-					int n_new = 1;
-
-					/*if( params.flag( eFullParamsFlags::TokenTimestamps ) )
-					{
-						expComputeTokenLevelTimestamps( (int)result_all.size() - 1, params.thold_pt, params.thold_ptsum );
-						if( params.max_len > 0 )
-							n_new = wrapSegment( params.max_len );
-					}*/
-					if (nullptr != params.new_segment_callback)
-					{
-						auto cb = profiler.cpuBlock(eCpuBlock::Callbacks);
-						HRESULT hr = params.new_segment_callback(this, n_new, params.new_segment_callback_user_data);
-						if (FAILED(hr))
-							return hr;
-					}
-				}
-			}
 		}
-		else if (failed) { 
-			int t0 = seek;
-			int t1 = seek + 500;
-			result_all.push_back({ t0, t1, "do not find segment!", {}});
-			seek += 500;
-			continue;
-		}
-		
+
+		// When the decoder found nothing usable (empty result), seek_delta is still the full
+		// chunk, so this advances past the window and keeps making forward progress.
 		seek += seek_delta;
 	}
 

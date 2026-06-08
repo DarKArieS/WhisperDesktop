@@ -18,14 +18,19 @@ DirectCompute（HLSL compute shader）從頭重寫的 GPU 推論引擎。它的�
 
 ## 一、解碼品質（最大缺口）
 
-### 1. Temperature fallback（溫度回退）— 最關鍵缺失
-whisper.cpp 在一段解碼失敗時（觸發 `compression_ratio_threshold` /
-`logprob_threshold` / `no_speech_threshold`）會自動以遞增溫度重試
+### 1. Temperature fallback（溫度回退）— ✅ 已實作
+whisper.cpp 在一段解碼失敗時（觸發 `entropy_thold` /
+`logprob_thold` / `no_speech_thold`）會自動以遞增溫度重試
 （0.0→0.2→…→1.0），是它穩定不亂碼的核心機制。
 
-本專案 **完全沒有 temperature 概念**（`Whisper/API/sFullParams.h` 連欄位都沒有）。
-取而代之的是 `Whisper/Whisper/ContextImpl.cpp:807-866` 一個粗糙 hack：偵測到同一段
-文字重複 >5 次就直接塞一句 `"repeat too many times! jump..."` 跳過，會直接丟字。
+已補上完整的 temperature fallback：`sFullParams` 新增 `temperature`、`temperature_inc`、
+`entropy_thold`、`logprob_thold`、`no_speech_thold`、`best_of` 欄位（預設值與 whisper.cpp
+相同：0.0 / 0.2 / 2.4 / -1.0 / 0.6 / 5），並與 `WhisperNet/Internal/sFullParams.cs` 的
+ABI 對齊。`runFullImpl` 改成：每個 seek 先 encode 一次，再以遞增溫度重複呼叫新的
+`decodeSegment`，依品質門檻（最後 32 token 的 entropy、平均 logprob、no-speech 機率）決定
+是否回退。`sampleBest` 支援 `temperature > 0` 時依 `p^(1/T)` 分布抽樣（GPU 已 softmax，
+故用 log-prob 還原溫度）。原本 `"repeat too many times! jump..."` 與
+`"do not find segment!"` 兩個會丟字的 hack 已移除。
 
 ### 2. Beam search — 宣告了但沒實作
 `sFullParams.h` 的 `eSamplingStrategy::BeamSearch` 註解寫著
@@ -91,14 +96,14 @@ whisper.cpp 近期整合 Silero VAD 模型，先切出語音段再轉錄，大�
 | tinydiarize (tdrz) 語者 token | ✅ | 只有自製雙聲道 diarize（`ContextImpl.diarize.cpp`） |
 | 字級信心 / karaoke 上色輸出 | ✅ | ❌ |
 | 自動語言偵測 | ✅ | ✅ **已實作**（`detectLanguage` `ContextImpl.cpp:62`；README 第 139 行「not implemented」已過時） |
-| temperature / entropy 門檻 | ✅ | ❌ |
+| temperature / entropy 門檻 | ✅ | ✅ **已實作**（temperature fallback，見上方第 1 項） |
 
 ---
 
 ## 建議優先順序（針對維護）
 
-1. **Temperature fallback + compression-ratio/logprob 門檻** — CP 值最高，
-   直接解掉現在「重複就跳過丟字」的根本問題。
+1. ~~**Temperature fallback + entropy/logprob 門檻**~~ — ✅ 已完成，
+   已解掉「重複就跳過丟字」的根本問題。
 2. **量化模型載入**（`WhisperModel.cpp` 的 ftype 分支 + 對應 dequant compute shader）
    — 解 VRAM 與相容性。
 3. **重新啟用並改用 DTW 時間戳** — 目前是註解掉的死碼。

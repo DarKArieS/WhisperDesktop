@@ -74,6 +74,14 @@ HRESULT COMLIGHTCALL ContextImpl::fullDefaultParams( eSamplingStrategy strategy,
 	rdi->thold_ptsum = 0.01f;
     rdi->language = UINT_MAX;
 
+	// Temperature fallback defaults (same values as whisper.cpp)
+	rdi->temperature = 0.0f;
+	rdi->temperature_inc = 0.2f;
+	rdi->entropy_thold = 2.4f;
+	rdi->logprob_thold = -1.0f;
+	rdi->no_speech_thold = 0.6f;
+	rdi->best_of = 5;
+
 	switch( strategy )
 	{
 	case eSamplingStrategy::Greedy:
