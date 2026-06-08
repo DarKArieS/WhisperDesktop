@@ -919,12 +919,23 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 		std::vector<sTokenData>& tokens_cur = best.tokens;
 		const int seek_delta = best.seek_delta;
 
-		// add the accepted tokens to the rolling context
-		for( const auto& r : tokens_cur )
-			prompt_past.push_back( r.id );
+		// Skip segments that are silence or music: high no-speech probability combined with low
+		// average log-probability means the model is uncertain and the audio is likely non-speech.
+		const bool is_no_speech = ( best.no_speech_prob > params.no_speech_thold &&
+			best.avg_logprob < params.logprob_thold );
+		if( is_no_speech )
+			logDebug( u8"seek %d: no-speech segment skipped (no_speech_prob=%.3f avg_logprob=%.3f)",
+				seek, best.no_speech_prob, best.avg_logprob );
+
+		// add the accepted tokens to the rolling context (skip if silent)
+		if( !is_no_speech )
+		{
+			for( const auto& r : tokens_cur )
+				prompt_past.push_back( r.id );
+		}
 
 		// store the text from this iteration, one segment per timestamp boundary
-		if( !tokens_cur.empty() )
+		if( !tokens_cur.empty() && !is_no_speech )
 		{
 			int i0 = 0;
 			int t0 = seek + 2 * ( tokens_cur.front().tid - vocab.token_beg );

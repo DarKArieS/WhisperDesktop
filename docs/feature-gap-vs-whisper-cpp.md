@@ -46,8 +46,19 @@ whisper.cpp 有 `suppress_blank`、`suppress_nst`（non-speech tokens）、
 旗標 `SuppressBlank` / `SuppressNonSpeech` 預設開啟。詳見 `plan-03-nonspeech-suppression.md`。
 （`suppress_regex` 暫未做。）
 
-### 4. no_speech 偵測
-沒有 `no_speech_thold` 與 `no_speech_prob`，無法判斷整段是靜音/音樂而跳過。
+### 4. no_speech 偵測（靜音段跳過）— ✅ 已實作
+`no_speech_prob` 已從正確 token（token 50361 = `<|nospeech|>`，本專案稱 `token_solm`）讀取，
+`no_speech_thold`（預設 0.6）也已定義並用於 temperature fallback 閘門（`ContextImpl.cpp:911`）。
+
+**缺失**：whisper.cpp 第二個用途的靜音跳過邏輯仍未實作。whisper.cpp 在：
+```
+is_no_speech = (no_speech_prob > no_speech_thold && avg_logprobs < logprob_thold)
+```
+成立時，會略過整段（不加入 `result_all`、不加入 rolling context）。
+WhisperDesktop 的 `runFullImpl`（`ContextImpl.cpp:918-977`）無此判斷，靜音／音樂段仍會被輸出給使用者。
+
+修法：在 `runFullImpl` 的 `seek_delta` 決定之後、`result_all.push_back` 與 `prompt_past.push_back` 之前，
+加一個 `is_no_speech` gate。
 
 ---
 
