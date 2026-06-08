@@ -30,6 +30,11 @@ namespace Whisper
 		// Experimental
 		TokenTimestamps = 0x100,
 		SpeedupAudio = 0x200,
+
+		/// <summary>Suppress the blank/space token at the start of a segment</summary>
+		SuppressBlank = 0x400,
+		/// <summary>Suppress non-speech tokens (musical notes, brackets, symbols, etc.)</summary>
+		SuppressNonSpeech = 0x800,
 	};
 
 	/// <summary>Transcribe parameters</summary>

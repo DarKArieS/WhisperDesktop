@@ -32,10 +32,14 @@ whisper.cpp 在一段解碼失敗時（觸發 `compression_ratio_threshold` /
 `// TODO: not implemented yet!`。`runFullImpl` 只有 greedy
 （`ContextImpl.cpp:681`）。也沒有 `best_of` / 多 decoder。
 
-### 3. 非語音 token 抑制（suppression）
+### 3. 非語音 token 抑制（suppression）— ✅ 已實作
 whisper.cpp 有 `suppress_blank`、`suppress_nst`（non-speech tokens）、
-`suppress_regex`。本專案的 `sampleBest`（`ContextImpl.cpp:126`）只跳過
+`suppress_regex`。本專案原本的 `sampleBest`（`ContextImpl.cpp`）只跳過
 `sot/solm/not` 三個 token，沒有完整抑制清單，容易吐出 `♪`、emoji、標點雜訊。
+
+已補上 `suppress_blank` 與 `suppress_nst`（含 `♩♪♫♬♭♮♯`、`「」『』`、括號序列等），
+旗標 `SuppressBlank` / `SuppressNonSpeech` 預設開啟。詳見 `plan-03-nonspeech-suppression.md`。
+（`suppress_regex` 暫未做。）
 
 ### 4. no_speech 偵測
 沒有 `no_speech_thold` 與 `no_speech_prob`，無法判斷整段是靜音/音樂而跳過。

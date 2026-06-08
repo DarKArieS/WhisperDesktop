@@ -36,5 +36,14 @@ namespace Whisper.Internals
 		internal pfnEncoderBegin? encoderBeginCallback;
 		/// <summary>Parameter for the above, not needed in C#</summary>
 		internal IntPtr encoderBeginCallbackData;
+
+		// Temperature fallback. These must mirror the trailing fields of the native sFullParams
+		// struct so the marshaled struct size matches; populated by fullDefaultParams().
+		internal float temperature;
+		internal float temperature_inc;
+		internal float entropy_thold;
+		internal float logprob_thold;
+		internal float no_speech_thold;
+		internal int best_of;
 	}
 }

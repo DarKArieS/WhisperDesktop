@@ -31,6 +31,11 @@ namespace Whisper
 		// Experimental
 		TokenTimestamps = 0x100,
 		SpeedupAudio = 0x200,
+
+		// Suppress the blank/space token at the start of a segment
+		SuppressBlank = 0x400,
+		// Suppress non-speech tokens (musical notes, brackets, symbols, etc.)
+		SuppressNonSpeech = 0x800,
 	};
 
 	inline eFullParamsFlags operator | ( eFullParamsFlags a, eFullParamsFlags b )

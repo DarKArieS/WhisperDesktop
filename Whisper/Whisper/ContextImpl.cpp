@@ -122,6 +122,55 @@ HRESULT ContextImpl::decode( const int* prompt_tokens, size_t prompt_length, int
 	}
 }
 
+// Build the set of non-speech token ids to suppress during sampling.
+// Mirrors OpenAI Whisper's tokenizer.non_speech_tokens / whisper.cpp whisper_process_logits.
+// ref: https://github.com/openai/whisper/blob/main/whisper/tokenizer.py
+void ContextImpl::buildSuppressTokens()
+{
+	const Vocabulary& vocab = model.shared->vocab;
+
+	suppress_tokens.clear();
+	token_space = vocab.findId( " " );
+
+	// Symbols and bracket sequences that should never appear in spoken transcription.
+	// Non-ASCII entries are written as explicit UTF-8 escapes (「」『』 and ♩♪♫♬♭♮♯).
+	static const char* const nonSpeech[] =
+	{
+		"\"", "#", "(", ")", "*", "+", "/", ":", ";", "<", "=", ">", "@", "[", "\\", "]", "^",
+		"_", "`", "{", "|", "}", "~",
+		"\xe3\x80\x8c", "\xe3\x80\x8d", "\xe3\x80\x8e", "\xe3\x80\x8f", // 「 」 『 』
+		"<<", ">>", "<<<", ">>>", "--", "---", "-(", "-[", "('", "(\"", "((", "))", "(((", ")))",
+		"[[", "]]", "{{", "}}",
+		"\xe2\x99\xaa\xe2\x99\xaa", "\xe2\x99\xaa\xe2\x99\xaa\xe2\x99\xaa", // ♪♪ ♪♪♪
+		"\xe2\x99\xa9", "\xe2\x99\xaa", "\xe2\x99\xab", "\xe2\x99\xac", // ♩ ♪ ♫ ♬
+		"\xe2\x99\xad", "\xe2\x99\xae", "\xe2\x99\xaf",                 // ♭ ♮ ♯
+	};
+
+	const auto add = [ & ]( const std::string& s )
+	{
+		const int id = vocab.findId( s );
+		if( id >= 0 )
+			suppress_tokens.push_back( id );
+	};
+
+	// Suppress each symbol both on its own and prefixed with a space, when it is a single token.
+	for( const char* s : nonSpeech )
+	{
+		add( s );
+		add( std::string( " " ) + s );
+	}
+
+	// Allow hyphens "-" and single quotes "'" between words, but not at the beginning of a word.
+	add( " -" );
+	add( " '" );
+
+	std::sort( suppress_tokens.begin(), suppress_tokens.end() );
+	suppress_tokens.erase( std::unique( suppress_tokens.begin(), suppress_tokens.end() ), suppress_tokens.end() );
+
+	suppress_built = true;
+	logDebug( u8"Built non-speech suppression list, %zu tokens", suppress_tokens.size() );
+}
+
 // the most basic sampling scheme - select the top token
 sTokenData ContextImpl::sampleBest( const float* probs, bool force_timestamp, bool is_initial )
 {
@@ -136,6 +185,20 @@ sTokenData ContextImpl::sampleBest( const float* probs, bool force_timestamp, bo
 
 	for( size_t i = 0; i < n_logits; i++ )
 		probs_id.emplace_back( probs[ i ], (int)i );
+
+	// Suppress non-speech / blank tokens before the timestamp decision and top-K selection.
+	// probs_id[ i ] still maps 1:1 to token id i at this point (no sorting yet).
+	if( suppress_nst )
+	{
+		for( const int id : suppress_tokens )
+			probs_id[ id ].first = -INFINITY;
+	}
+	if( suppress_blank && is_initial )
+	{
+		probs_id[ vocab.token_eot ].first = -INFINITY;
+		if( token_space >= 0 )
+			probs_id[ token_space ].first = -INFINITY;
+	}
 
 	{
 		double sum_ts = 0.0;
@@ -543,6 +606,12 @@ HRESULT COMLIGHTCALL ContextImpl::runFullImpl( const sFullParams& params, const 
 
 	// overwrite audio_ctx
 	exp_n_audio_ctx = params.audio_ctx;
+
+	// non-speech / blank token suppression (whisper.cpp whisper_process_logits)
+	suppress_blank = params.flag( eFullParamsFlags::SuppressBlank );
+	suppress_nst = params.flag( eFullParamsFlags::SuppressNonSpeech );
+	if( suppress_nst && !suppress_built )
+		buildSuppressTokens();
 
 	uint32_t detectedLanguage = params.language;
 	if( vocab.is_multilingual() && detectedLanguage == UINT_MAX )

@@ -68,7 +68,8 @@ HRESULT COMLIGHTCALL ContextImpl::fullDefaultParams( eSamplingStrategy strategy,
 	rdi->strategy = strategy;
 	rdi->cpuThreads = defaultThreadsCount();
 	rdi->n_max_text_ctx = 16384;
-	rdi->flags = eFullParamsFlags::PrintProgress | eFullParamsFlags::PrintTimestamps;
+	rdi->flags = eFullParamsFlags::PrintProgress | eFullParamsFlags::PrintTimestamps |
+		eFullParamsFlags::SuppressBlank | eFullParamsFlags::SuppressNonSpeech;
 	rdi->thold_pt = 0.01f;
 	rdi->thold_ptsum = 0.01f;
     rdi->language = UINT_MAX;

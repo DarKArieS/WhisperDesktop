@@ -53,10 +53,19 @@ namespace Whisper
 
 		HRESULT encode( iSpectrogram& mel, int seek );
 		HRESULT decode( const int* tokens, size_t length, int n_past, int threads );
-     HRESULT detectLanguage( iSpectrogram& mel, int seek, int threads, uint32_t& language );
+		HRESULT detectLanguage( iSpectrogram& mel, int seek, int threads, uint32_t& language );
 		sTokenData sampleBest( const float* probs, bool force_timestamp, bool is_initial );
 		sTokenData sampleBest();
 		sTokenData sampleTimestamp( bool initial );
+
+		// Non-speech / blank token suppression, mirrors whisper.cpp whisper_process_logits
+		std::vector<int> suppress_tokens; // non-speech token ids, built once from the vocabulary
+		int token_space = -1;             // id of the " " (blank) token, or -1 if absent
+		bool suppress_built = false;
+		bool suppress_blank = false;
+		bool suppress_nst = false;
+		void buildSuppressTokens();
+		
 		int wrapSegment( int max_len );
 		void expComputeTokenLevelTimestamps( int i_segment, float thold_pt, float thold_ptsum );
 
